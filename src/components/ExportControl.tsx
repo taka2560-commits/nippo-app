@@ -22,18 +22,8 @@ export const ExportControl = () => {
     };
 
     const handleExportPDF = async () => {
-        const settings = getSettings();
-        const siteName = settings?.workSiteGroups[0]?.sites[0] || ""; // 仮で最初の現場名を取得、本来は選択させるか、日報データから推測するか
-        // しかし「月報」は現場ごとの場合が多い。
-        // 要望には「フィルター」等の指定はないため、一旦全データを対象にするが、
-        // 現場名がPDFタイトルに入る仕様にしたので、設定から何かしら取ってくるか、あるいは空にする。
-        // ここでは「現場名」はエクスポート時点で指定させるUIがないため、空、あるいはユーザー入力を促すpromptを出す等の対応が考えられる。
-        // 簡易的にpromptで聞いてみる。
-        const inputSiteName = prompt("PDFに記載する現場名を入力してください", siteName);
-        if (inputSiteName === null) return; // キャンセル
-
         const data = generateMonthlyReportData(year, month);
-        await exportToPDF(data, year, month, inputSiteName);
+        await exportToPDF(data, year, month);
     };
 
     return (

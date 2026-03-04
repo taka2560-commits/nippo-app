@@ -6,6 +6,7 @@ import autoTable from "jspdf-autotable";
 export interface MonthlyReportData {
     date: string; // YYYY-MM-DD
     dayOfWeek: string; // 火, 水...
+    siteName: string; // 現場名
     content: string; // 作業内容
     location: string; // 場所
     manDays: number; // 人工
@@ -69,6 +70,7 @@ export const generateMonthlyReportData = (year: number, month: number): MonthlyR
             result.push({
                 date: `${d.getMonth() + 1}/${d.getDate()}`,
                 dayOfWeek,
+                siteName: report.workSite || "",
                 content: content, // 場所も含める場合は `${content} ${location ? `(${location})` : ""}`
                 location,
                 manDays,
@@ -84,6 +86,7 @@ export const generateMonthlyReportData = (year: number, month: number): MonthlyR
             result.push({
                 date: `${d.getMonth() + 1}/${d.getDate()}`,
                 dayOfWeek,
+                siteName: "",
                 content: "",
                 location: "",
                 manDays: 0,
@@ -143,9 +146,9 @@ export const exportToExcel = (data: MonthlyReportData[], year: number, month: nu
 /**
  * PDF出力（画像レイアウト風）
  */
-export const exportToPDF = async (data: MonthlyReportData[], year: number, month: number, siteName: string = "") => {
-    // A4横向き
-    const doc = new jsPDF("l", "pt", "a4");
+export const exportToPDF = async (data: MonthlyReportData[], year: number, month: number) => {
+    // A4縦向き
+    const doc = new jsPDF("p", "pt", "a4");
 
     // 日本語フォント読み込み
     try {
@@ -175,74 +178,66 @@ export const exportToPDF = async (data: MonthlyReportData[], year: number, month
     }
 
     // タイトル
-    doc.setFontSize(18);
+    doc.setFontSize(16);
     // フォント指定
     try {
         doc.setFont("IBMPlexSansJP");
     } catch { }
 
     doc.text(`作業月報 令和${year - 2018}年${month}月度`, 40, 40);
-    doc.setFontSize(12);
-    doc.text(`現場名: ${siteName}`, 300, 40);
 
-    // データ検証とサニタイズ
-    const bodyData = data.map((d) => [
-        d.date || "",
-        d.dayOfWeek || "",
-        (d.content || "") + (d.location ? ` (${d.location})` : ""),
-        d.manDays ? String(d.manDays) : "",
-        "人",
-        d.materials || "",
-        d.remarks || "",
-        d.earlyOvertime ? String(d.earlyOvertime) : "",
-        d.normalOvertime ? String(d.normalOvertime) : "",
-        d.workerNames || ""
-    ]);
+    // データ検証とサニタイズ（フォーマット変更：日付(曜日), 現場名, 場所, 作業内容, 人工, 作業員名）
+    const bodyData = data.map((d) => {
+        const dateStr = d.date ? `${d.date}(${d.dayOfWeek})` : "";
+        return [
+            dateStr,
+            d.siteName || "",
+            d.location || "",
+            d.content || "",
+            d.manDays ? String(d.manDays) : "",
+            d.workerNames || ""
+        ];
+    });
 
     // デバッグ情報
     console.log("PDF Body Data Sample:", bodyData[0]);
 
+    // A4の横幅は約595pt。左右マージン40ptとすると、テーブル幅は515pt。
     const tableMetadata = {
         startY: 60,
         head: [[
-            "日", "曜日", "主な作業内容",
-            "出来高\n数量", "単位",
-            "材料・リース", "備考",
-            "早出", "残業", "作業員名"
+            "日付", "現場名", "場所", "作業内容", "人工", "作業員名"
         ]],
         body: bodyData,
         theme: "grid" as const,
         styles: {
-            fontSize: 7,
-            cellPadding: 2,
+            fontSize: 8,
+            cellPadding: 3,
+            minCellHeight: 24, // 行の高さを一定にする
             overflow: "linebreak" as const,
             font: "IBMPlexSansJP",
             fontStyle: "normal" as const,
             valign: "middle" as const,
         },
         headStyles: {
-            fillColor: [220, 220, 220] as [number, number, number],
-            textColor: 0,
+            fillColor: [60, 100, 150] as [number, number, number], // 少し青みがかったヘッダー色で見栄えを良く
+            textColor: 255,
             halign: "center" as const,
             valign: "middle" as const,
-            lineWidth: 0.5,
-            lineColor: 100
+            lineWidth: 0.1,
+            lineColor: 150
         },
         bodyStyles: {
-            lineWidth: 0.5,
+            lineWidth: 0.1,
             lineColor: 150
         },
         columnStyles: {
-            0: { cellWidth: 30, halign: "center" as const }, // 日
-            1: { cellWidth: 25, halign: "center" as const }, // 曜日
-            // 2: 作業内容（自動）
-            3: { cellWidth: 35, halign: "right" as const }, // 出来高
-            4: { cellWidth: 30, halign: "center" as const }, // 単位
-            5: { cellWidth: 100 }, // 材料
-            6: { cellWidth: 80 }, // 備考
-            7: { cellWidth: 35, halign: "right" as const }, // 早出
-            8: { cellWidth: 35, halign: "right" as const }, // 残業
-            9: { cellWidth: 100 }, // 作業員名
+            0: { cellWidth: 45, halign: "center" as const }, // 日付(曜日)
+            1: { cellWidth: 90 }, // 現場名
+            2: { cellWidth: 70 }, // 場所
+            3: { cellWidth: 155 }, // 作業内容
+            4: { cellWidth: 25, halign: "center" as const }, // 人工
+            5: { cellWidth: 130 }, // 作業員名
         },
     };
 
