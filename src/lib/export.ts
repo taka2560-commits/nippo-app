@@ -186,7 +186,7 @@ export const exportToPDF = async (data: MonthlyReportData[], year: number, month
 
     doc.text(`作業月報 令和${year - 2018}年${month}月度`, 40, 40);
 
-    // データ検証とサニタイズ（フォーマット変更：日付(曜日), 現場名, 場所, 作業内容, 人工, 作業員名）
+    // データ検証とサニタイズ（フォーマット変更：日付(曜日), 現場名, 場所, 作業内容, 人工, 残業, 作業員名）
     const bodyData = data.map((d) => {
         const dateStr = d.date ? `${d.date}(${d.dayOfWeek})` : "";
         return [
@@ -195,6 +195,7 @@ export const exportToPDF = async (data: MonthlyReportData[], year: number, month
             d.location || "",
             d.content || "",
             d.manDays ? String(d.manDays) : "",
+            d.normalOvertime ? String(d.normalOvertime) : "",
             d.workerNames || ""
         ];
     });
@@ -206,7 +207,7 @@ export const exportToPDF = async (data: MonthlyReportData[], year: number, month
     const tableMetadata = {
         startY: 60,
         head: [[
-            "日付", "現場名", "場所", "作業内容", "人工", "作業員名"
+            "日付", "現場名", "場所", "作業内容", "人工", "残業", "作業員名"
         ]],
         body: bodyData,
         theme: "grid" as const,
@@ -235,9 +236,10 @@ export const exportToPDF = async (data: MonthlyReportData[], year: number, month
             0: { cellWidth: 45, halign: "center" as const }, // 日付(曜日)
             1: { cellWidth: 90 }, // 現場名
             2: { cellWidth: 70 }, // 場所
-            3: { cellWidth: 155 }, // 作業内容
+            3: { cellWidth: 130 }, // 作業内容
             4: { cellWidth: 25, halign: "center" as const }, // 人工
-            5: { cellWidth: 130 }, // 作業員名
+            5: { cellWidth: 25, halign: "center" as const }, // 残業
+            6: { cellWidth: 130 }, // 作業員名
         },
     };
 
