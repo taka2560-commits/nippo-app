@@ -839,6 +839,32 @@ export default function ReportForm() {
                             </button>
                         )}
 
+                        {/* Googleカレンダー連携ボタン（メイン画面用） */}
+                        {workSite && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    if (!reportDate || !workSite) return;
+                                    const dateStr = reportDate.replace(/-/g, "");
+                                    const nextDate = new Date(reportDate);
+                                    nextDate.setDate(nextDate.getDate() + 1);
+                                    const nextDateStr = nextDate.toISOString().split("T")[0].replace(/-/g, "");
+                                    
+                                    const text = encodeURIComponent(`現場: ${workSite}`);
+                                    const details = encodeURIComponent(workEntries.map(e => e.content).filter(Boolean).join("\n") || "");
+                                    
+                                    const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&dates=${dateStr}/${nextDateStr}&details=${details}`;
+                                    window.open(url, "_blank");
+                                }}
+                                className="flex w-full items-center justify-center gap-2 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 py-3 text-sm font-semibold text-emerald-400 transition-all active:bg-emerald-500/20"
+                            >
+                                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/>
+                                </svg>
+                                Googleカレンダーに予定を追加
+                            </button>
+                        )}
+
                         {!isComplete && !isManDayOver && status !== "submitting" && (
                             <p className="text-center text-xs text-slate-500">
                                 ※ すべての項目を入力すると送信できます
