@@ -102,11 +102,19 @@ export default function SuccessOverlay({
                         {message}
                     </h1>
 
-                    {/* Googleカレンダー連携ボタン */}
+                    {/* 閉じる（次へ）ボタン */}
+                    <button
+                        onClick={handleClose}
+                        className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white text-teal-600 px-6 py-4 font-bold shadow-lg transition-transform active:scale-95"
+                    >
+                        入力画面に戻る
+                    </button>
+
+                    {/* Googleカレンダー連携ボタン（下側） */}
                     {reportDate && workSite && (
                         <button
                             onClick={handleCalendarClick}
-                            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white text-emerald-600 px-6 py-4 font-bold shadow-lg transition-transform active:scale-95"
+                            className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-white/30 bg-white/10 text-white px-6 py-4 font-bold backdrop-blur-sm transition-transform active:scale-95"
                         >
                             <svg className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
                                 <path d="M14.4 6L14 4H5v17h2v-7h5.6l.4 2h7V6z"/>
@@ -114,14 +122,6 @@ export default function SuccessOverlay({
                             Googleカレンダーに追加
                         </button>
                     )}
-
-                    {/* 閉じる（次へ）ボタン */}
-                    <button
-                        onClick={handleClose}
-                        className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-white/30 bg-white/10 text-white px-6 py-4 font-bold backdrop-blur-sm transition-transform active:scale-95"
-                    >
-                        入力画面に戻る
-                    </button>
                 </div>
             </div>
         </div>
