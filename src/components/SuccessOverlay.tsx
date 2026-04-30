@@ -8,6 +8,7 @@ interface SuccessOverlayProps {
     reportDate?: string;
     workSite?: string;
     workContents?: string;
+    workerNames?: string[];
 }
 
 export default function SuccessOverlay({ 
@@ -15,7 +16,8 @@ export default function SuccessOverlay({
     message = "本日の日報入力完了",
     reportDate,
     workSite,
-    workContents
+    workContents,
+    workerNames = []
 }: SuccessOverlayProps) {
     const [visible, setVisible] = useState(false);
 
@@ -42,7 +44,8 @@ export default function SuccessOverlay({
         const nextDateStr = nextDate.toISOString().split("T")[0].replace(/-/g, "");
         
         const text = encodeURIComponent(`現場: ${workSite}`);
-        const details = encodeURIComponent(workContents || "");
+        const workersStr = workerNames.length > 0 ? `作業員: ${workerNames.join(", ")}\n\n` : "";
+        const details = encodeURIComponent(`${workersStr}作業内容:\n${workContents || ""}`);
         
         const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&dates=${dateStr}/${nextDateStr}&details=${details}`;
         

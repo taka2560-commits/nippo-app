@@ -392,6 +392,7 @@ export default function ReportForm() {
                     reportDate={reportDate}
                     workSite={workSite}
                     workContents={workEntries.map(e => e.content).filter(Boolean).join("\n")}
+                    workerNames={workerNames}
                 />
             )}
 
@@ -851,7 +852,8 @@ export default function ReportForm() {
                                     const nextDateStr = nextDate.toISOString().split("T")[0].replace(/-/g, "");
                                     
                                     const text = encodeURIComponent(`現場: ${workSite}`);
-                                    const details = encodeURIComponent(workEntries.map(e => e.content).filter(Boolean).join("\n") || "");
+                                    const workersStr = workerNames.length > 0 ? `作業員: ${workerNames.join(", ")}\n\n` : "";
+                                    const details = encodeURIComponent(`${workersStr}作業内容:\n${workEntries.map(e => e.content).filter(Boolean).join("\n") || ""}`);
                                     
                                     const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${text}&dates=${dateStr}/${nextDateStr}&details=${details}`;
                                     window.open(url, "_blank");
