@@ -26,6 +26,7 @@ export default function SuccessOverlay({
 
     const handleClose = () => {
         setVisible(false);
+        // Force Cache Busting - v1.1
         setTimeout(onComplete, 500); // フェードアウト後にリセット
     };
 
