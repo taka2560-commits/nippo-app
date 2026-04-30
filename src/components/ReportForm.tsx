@@ -10,6 +10,7 @@ import CalendarPicker from "./CalendarPicker";
 import { ExportControl } from "./ExportControl";
 import {
     getSettings,
+    saveSettings,
     saveReport,
     getReportByDate,
     deleteReport,
@@ -289,6 +290,45 @@ export default function ReportForm() {
 
             saveReport(reportData);
 
+            // --- 手入力された新しい項目を記憶する処理 ---
+            if (options) {
+                let updatedSettings = { ...options };
+                let hasChanges = false;
+
+                // 新しい作業内容
+                const newContents = workEntries.map(e => e.content.trim()).filter(Boolean);
+                newContents.forEach(content => {
+                    if (!updatedSettings.workContents.includes(content)) {
+                        updatedSettings.workContents = [...updatedSettings.workContents, content];
+                        hasChanges = true;
+                    }
+                });
+
+                // 新しい場所
+                const newLocations = workEntries.map(e => e.location.trim()).filter(Boolean);
+                newLocations.forEach(location => {
+                    if (!updatedSettings.locationOptions.includes(location)) {
+                        updatedSettings.locationOptions = [...updatedSettings.locationOptions, location];
+                        hasChanges = true;
+                    }
+                });
+
+                // 新しい材料
+                const newMaterials = materials.map(m => m.name.trim()).filter(Boolean);
+                newMaterials.forEach(mat => {
+                    if (!updatedSettings.materialOptions.includes(mat)) {
+                        updatedSettings.materialOptions = [...updatedSettings.materialOptions, mat];
+                        hasChanges = true;
+                    }
+                });
+
+                if (hasChanges) {
+                    saveSettings(updatedSettings); // localStorageに保存
+                    setOptions(updatedSettings);   // stateも更新しておく
+                }
+            }
+            // ------------------------------------------------
+
             setStatus("success");
             // 入力済み日付一覧を更新
             fetchSubmittedDates();
@@ -346,7 +386,14 @@ export default function ReportForm() {
     return (
         <>
             {/* 成功オーバーレイ */}
-            {status === "success" && <SuccessOverlay onComplete={resetForm} />}
+            {status === "success" && (
+                <SuccessOverlay 
+                    onComplete={resetForm} 
+                    reportDate={reportDate}
+                    workSite={workSite}
+                    workContents={workEntries.map(e => e.content).filter(Boolean).join("\n")}
+                />
+            )}
 
             <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
                 {/* 削除確認ダイアログ */}

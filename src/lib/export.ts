@@ -212,9 +212,9 @@ export const exportToPDF = async (data: MonthlyReportData[], year: number, month
         body: bodyData,
         theme: "grid" as const,
         styles: {
-            fontSize: 8,
-            cellPadding: 3,
-            minCellHeight: 24, // 行の高さを一定にする
+            fontSize: 7,
+            cellPadding: 2,
+            minCellHeight: 20, // 行の高さを少し小さくして1ページに収める
             overflow: "linebreak" as const,
             font: "IBMPlexSansJP",
             fontStyle: "normal" as const,
