@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -8,6 +8,12 @@ import {
     saveSettings,
     StorageSettings,
     SiteGroup,
+    BackupData,
+    ImportMode,
+    createBackup,
+    getBackupFileName,
+    parseBackup,
+    restoreBackup,
 } from "@/lib/storage";
 
 export default function SettingsPage() {
@@ -23,11 +29,97 @@ export default function SettingsPage() {
     const [newLocation, setNewLocation] = useState("");
     const [newMaterial, setNewMaterial] = useState("");
 
+    // データ引き継ぎ用state
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [pendingBackup, setPendingBackup] = useState<BackupData | null>(null);
+    const [transferMessage, setTransferMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
+    const [canShareFile, setCanShareFile] = useState(false);
+
     // 設定読み込み
     useEffect(() => {
         const currentSettings = getSettings();
         setSettings(currentSettings);
+
+        // ファイル共有（LINE・メール・AirDrop等）に対応した端末か判定
+        try {
+            const probe = new File(["{}"], "probe.json", { type: "application/json" });
+            setCanShareFile(!!navigator.canShare && navigator.canShare({ files: [probe] }));
+        } catch {
+            setCanShareFile(false);
+        }
     }, []);
+
+    // バックアップファイルを作成（未保存の変更も先に保存してから書き出す）
+    const buildBackupFile = (): File => {
+        if (settings) saveSettings(settings);
+        const backup = createBackup();
+        return new File([JSON.stringify(backup, null, 2)], getBackupFileName(), {
+            type: "application/json",
+        });
+    };
+
+    const handleDownloadBackup = () => {
+        const file = buildBackupFile();
+        const url = URL.createObjectURL(file);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = file.name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        setTransferMessage({ type: "success", text: `「${file.name}」を保存しました。新しい端末にこのファイルを移してください。` });
+    };
+
+    const handleShareBackup = async () => {
+        const file = buildBackupFile();
+        try {
+            await navigator.share({ files: [file], title: "日報バックアップ" });
+            setTransferMessage({ type: "success", text: "バックアップファイルを送信しました。新しい端末で受け取って読み込んでください。" });
+        } catch (e) {
+            // ユーザーが共有をキャンセルした場合は何もしない
+            if (e instanceof DOMException && e.name === "AbortError") return;
+            setTransferMessage({ type: "error", text: "共有できませんでした。「ファイルに保存」をお試しください。" });
+        }
+    };
+
+    const handleSelectBackupFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        e.target.value = ""; // 同じファイルを再選択できるようにクリア
+        if (!file) return;
+        setTransferMessage(null);
+        try {
+            setPendingBackup(parseBackup(await file.text()));
+        } catch (err) {
+            setPendingBackup(null);
+            setTransferMessage({ type: "error", text: err instanceof Error ? err.message : "読み込みに失敗しました。" });
+        }
+    };
+
+    const handleImport = (mode: ImportMode) => {
+        if (!pendingBackup) return;
+        if (
+            mode === "overwrite" &&
+            !confirm("この端末の設定と日報をすべて削除し、バックアップの内容に置き換えます。よろしいですか？")
+        ) {
+            return;
+        }
+        if (mode === "merge" && settings) saveSettings(settings); // 未保存の変更を残したまま追加する
+        const result = restoreBackup(pendingBackup, mode);
+        setSettings(getSettings());
+        setSelectedSiteGroupIndex(0);
+        setPendingBackup(null);
+        setTransferMessage({
+            type: "success",
+            text: `読み込みが完了しました（バックアップ内の日報 ${result.importedReportCount}件 / この端末の日報 合計${result.reportCount}件）。`,
+        });
+    };
+
+    const formatDateTime = (iso: string) => {
+        const d = new Date(iso);
+        if (!iso || isNaN(d.getTime())) return "不明";
+        return d.toLocaleString("ja-JP", { year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    };
 
     const handleSave = () => {
         if (!settings) return;
@@ -452,6 +544,104 @@ export default function SettingsPage() {
                                 </li>
                             ))}
                         </ul>
+                    </div>
+                </section>
+
+                {/* データ引き継ぎ（機種変更） */}
+                <section className="space-y-3">
+                    <h2 className="flex items-center gap-2 text-lg font-bold text-white">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-teal-500/20 text-teal-400">
+                            📲
+                        </span>
+                        データの引き継ぎ（機種変更）
+                    </h2>
+                    <div className="rounded-2xl border border-slate-700 bg-slate-800/50 p-4 space-y-5">
+                        <p className="text-xs leading-relaxed text-slate-400">
+                            設定（作業者・現場・作業内容などのリスト）と、これまでに入力した日報をまとめて1つのファイルにできます。
+                            古い端末で書き出し、新しい端末で読み込むとそのまま引き継げます。
+                        </p>
+
+                        {/* 書き出し */}
+                        <div className="space-y-2">
+                            <div className="text-sm font-bold text-slate-200">① 古い端末で書き出す</div>
+                            {canShareFile && (
+                                <button
+                                    onClick={handleShareBackup}
+                                    className="w-full rounded-xl bg-teal-600 px-4 py-3 text-sm font-bold text-white hover:bg-teal-500"
+                                >
+                                    LINE・メール等で送る
+                                </button>
+                            )}
+                            <button
+                                onClick={handleDownloadBackup}
+                                className={`w-full rounded-xl px-4 py-3 text-sm font-bold text-white ${canShareFile
+                                    ? "border border-teal-600 bg-transparent text-teal-300 hover:bg-teal-600/20"
+                                    : "bg-teal-600 hover:bg-teal-500"
+                                    }`}
+                            >
+                                ファイルに保存
+                            </button>
+                        </div>
+
+                        {/* 読み込み */}
+                        <div className="space-y-2">
+                            <div className="text-sm font-bold text-slate-200">② 新しい端末で読み込む</div>
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                accept=".json,application/json"
+                                onChange={handleSelectBackupFile}
+                                className="hidden"
+                            />
+                            {!pendingBackup ? (
+                                <button
+                                    onClick={() => fileInputRef.current?.click()}
+                                    className="w-full rounded-xl border border-slate-600 bg-slate-900 px-4 py-3 text-sm font-bold text-slate-200 hover:border-teal-500"
+                                >
+                                    バックアップファイルを選択
+                                </button>
+                            ) : (
+                                <div className="space-y-3 rounded-xl border border-teal-600/50 bg-slate-900 p-3">
+                                    <div className="space-y-1 text-xs text-slate-300">
+                                        <div>作成日時：{formatDateTime(pendingBackup.exportedAt)}</div>
+                                        <div>日報：{pendingBackup.reports.length}件 ／ 作業者：{pendingBackup.settings.workerNames.length}人 ／ 現場グループ：{pendingBackup.settings.workSiteGroups.length}件</div>
+                                    </div>
+                                    <button
+                                        onClick={() => handleImport("merge")}
+                                        className="w-full rounded-xl bg-teal-600 px-4 py-3 text-sm font-bold text-white hover:bg-teal-500"
+                                    >
+                                        この端末のデータに追加する
+                                    </button>
+                                    <button
+                                        onClick={() => handleImport("overwrite")}
+                                        className="w-full rounded-xl border border-red-500/60 px-4 py-3 text-sm font-bold text-red-300 hover:bg-red-500/10"
+                                    >
+                                        すべて置き換える
+                                    </button>
+                                    <button
+                                        onClick={() => setPendingBackup(null)}
+                                        className="w-full py-1 text-xs text-slate-400 hover:text-white"
+                                    >
+                                        キャンセル
+                                    </button>
+                                    <p className="text-[11px] leading-relaxed text-slate-500">
+                                        「追加する」：この端末のデータを残したまま取り込みます（同じ日付の日報はバックアップの内容になります）。<br />
+                                        「置き換える」：この端末のデータを消して、バックアップの内容だけにします。
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+
+                        {transferMessage && (
+                            <div
+                                className={`rounded-xl px-3 py-2 text-xs leading-relaxed ${transferMessage.type === "success"
+                                    ? "bg-emerald-500/10 text-emerald-300"
+                                    : "bg-red-500/10 text-red-300"
+                                    }`}
+                            >
+                                {transferMessage.text}
+                            </div>
+                        )}
                     </div>
                 </section>
 
