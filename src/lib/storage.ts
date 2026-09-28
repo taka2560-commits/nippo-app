@@ -199,3 +199,136 @@ export const deleteReport = (date: string) => {
     const newReports = reports.filter((r) => r.reportDate !== date);
     localStorage.setItem(REPORTS_KEY, JSON.stringify(newReports));
 };
+
+// バックアップ（機種変更時のデータ引き継ぎ）関連
+const BACKUP_APP_ID = "nippo-app";
+const BACKUP_VERSION = 1;
+
+export interface BackupData {
+    app: typeof BACKUP_APP_ID;
+    version: number;
+    exportedAt: string;
+    settings: StorageSettings;
+    reports: StoredReport[];
+}
+
+export type ImportMode = "merge" | "overwrite";
+
+export interface ImportResult {
+    reportCount: number; // 取り込み後の日報件数
+    importedReportCount: number; // バックアップに含まれていた日報件数
+}
+
+// 現在の設定と日報をバックアップ用のデータにまとめる
+export const createBackup = (): BackupData => ({
+    app: BACKUP_APP_ID,
+    version: BACKUP_VERSION,
+    exportedAt: new Date().toISOString(),
+    settings: getSettings(),
+    reports: getReports(),
+});
+
+export const getBackupFileName = (): string => {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}`;
+    return `nippo_backup_${stamp}.json`;
+};
+
+const isStringArray = (v: unknown): v is string[] =>
+    Array.isArray(v) && v.every((x) => typeof x === "string");
+
+// バックアップファイルの中身を検証してBackupDataとして返す（不正ならエラー）
+export const parseBackup = (text: string): BackupData => {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(text);
+    } catch {
+        throw new Error("ファイルを読み込めませんでした。バックアップファイル（.json）を選択してください。");
+    }
+
+    const data = parsed as Partial<BackupData> | null;
+    if (!data || typeof data !== "object" || data.app !== BACKUP_APP_ID) {
+        throw new Error("このファイルは日報アプリのバックアップではありません。");
+    }
+    if (typeof data.version !== "number" || data.version > BACKUP_VERSION) {
+        throw new Error("このバックアップは新しいバージョンのアプリで作成されています。アプリを更新してから再度お試しください。");
+    }
+
+    const settings = data.settings as Partial<StorageSettings> | undefined;
+    if (
+        !settings ||
+        typeof settings !== "object" ||
+        !isStringArray(settings.workerNames) ||
+        !Array.isArray(settings.workSiteGroups)
+    ) {
+        throw new Error("バックアップ内の設定データが壊れています。");
+    }
+    if (!Array.isArray(data.reports)) {
+        throw new Error("バックアップ内の日報データが壊れています。");
+    }
+
+    const reports = data.reports.filter(
+        (r): r is StoredReport =>
+            !!r && typeof r === "object" && typeof (r as StoredReport).reportDate === "string"
+    );
+
+    return {
+        app: BACKUP_APP_ID,
+        version: data.version,
+        exportedAt: typeof data.exportedAt === "string" ? data.exportedAt : "",
+        settings: { ...DEFAULT_SETTINGS, ...settings },
+        reports,
+    };
+};
+
+// マスタの文字列リストを重複なしで結合
+const mergeList = (base: string[], extra: string[]): string[] =>
+    Array.from(new Set([...base, ...extra]));
+
+const mergeSettings = (current: StorageSettings, incoming: StorageSettings): StorageSettings => {
+    const groups: SiteGroup[] = current.workSiteGroups.map((g) => ({ ...g, sites: [...g.sites] }));
+    for (const g of incoming.workSiteGroups) {
+        const existing = groups.find((x) => x.group === g.group);
+        if (existing) {
+            existing.sites = mergeList(existing.sites, g.sites);
+        } else {
+            groups.push({ group: g.group, sites: [...g.sites] });
+        }
+    }
+    return {
+        ...current,
+        workerNames: mergeList(current.workerNames, incoming.workerNames),
+        workSiteGroups: groups,
+        workContents: mergeList(current.workContents, incoming.workContents),
+        locationOptions: mergeList(current.locationOptions, incoming.locationOptions),
+        materialOptions: mergeList(current.materialOptions, incoming.materialOptions),
+    };
+};
+
+// バックアップを取り込む
+// merge: 今の端末のデータを残しつつ追加（同じ日付の日報はバックアップ側で上書き）
+// overwrite: 今の端末のデータをすべてバックアップの内容に置き換え
+export const restoreBackup = (backup: BackupData, mode: ImportMode): ImportResult => {
+    if (typeof window === "undefined") return { reportCount: 0, importedReportCount: 0 };
+
+    let settings: StorageSettings;
+    let reports: StoredReport[];
+
+    if (mode === "overwrite") {
+        settings = backup.settings;
+        reports = backup.reports;
+    } else {
+        settings = mergeSettings(getSettings(), backup.settings);
+        const byDate = new Map<string, StoredReport>();
+        for (const r of getReports()) byDate.set(r.reportDate, r);
+        for (const r of backup.reports) byDate.set(r.reportDate, r);
+        reports = Array.from(byDate.values());
+    }
+
+    reports.sort((a, b) => a.reportDate.localeCompare(b.reportDate));
+    saveSettings(settings);
+    localStorage.setItem(REPORTS_KEY, JSON.stringify(reports));
+
+    return { reportCount: reports.length, importedReportCount: backup.reports.length };
+};
