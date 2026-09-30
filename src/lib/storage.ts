@@ -6,12 +6,20 @@ export interface SiteGroup {
     sites: string[];
 }
 
+// よく使う「作業者＋現場」の組み合わせ
+export interface WorkPreset {
+    name: string;
+    workerNames: string[];
+    workSite: string;
+}
+
 export interface StorageSettings {
     workerNames: string[];
     workSiteGroups: SiteGroup[];
     workContents: string[];
     locationOptions: string[];
     materialOptions: string[];
+    presets: WorkPreset[];
     // 固定オプション（編集不可だが保存はしておく）
     manDayOptions: string[];
     overtimeOptions: string[]; // 早出残業の選択肢（0.5h, 1.0h...）
@@ -99,6 +107,7 @@ const DEFAULT_SETTINGS: StorageSettings = {
         "杭芯棒",
         "3Dスキャナー",
     ],
+    presets: [],
     manDayOptions: [
         "0.25", "0.5", "0.75", "1.0",
         "1.25", "1.5", "1.75", "2.0",
@@ -277,7 +286,20 @@ export const parseBackup = (text: string): BackupData => {
         app: BACKUP_APP_ID,
         version: data.version,
         exportedAt: typeof data.exportedAt === "string" ? data.exportedAt : "",
-        settings: { ...DEFAULT_SETTINGS, ...settings },
+        settings: {
+            ...DEFAULT_SETTINGS,
+            ...settings,
+            // 旧バージョンのバックアップには組み合わせが無いので空にする
+            presets: Array.isArray(settings.presets)
+                ? settings.presets.filter(
+                      (p): p is WorkPreset =>
+                          !!p &&
+                          typeof p.name === "string" &&
+                          typeof p.workSite === "string" &&
+                          isStringArray(p.workerNames)
+                  )
+                : [],
+        },
         reports,
     };
 };
@@ -296,8 +318,13 @@ const mergeSettings = (current: StorageSettings, incoming: StorageSettings): Sto
             groups.push({ group: g.group, sites: [...g.sites] });
         }
     }
+    const presets = [...current.presets];
+    for (const p of incoming.presets) {
+        if (!presets.some((x) => x.name === p.name)) presets.push(p);
+    }
     return {
         ...current,
+        presets,
         workerNames: mergeList(current.workerNames, incoming.workerNames),
         workSiteGroups: groups,
         workContents: mergeList(current.workContents, incoming.workContents),

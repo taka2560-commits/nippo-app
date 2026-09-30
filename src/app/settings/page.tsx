@@ -547,6 +547,50 @@ export default function SettingsPage() {
                     </div>
                 </section>
 
+                {/* よく使う組み合わせ */}
+                <section className="space-y-3">
+                    <h2 className="flex items-center gap-2 text-lg font-bold text-white">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-yellow-500/20 text-yellow-400">
+                            ⭐
+                        </span>
+                        よく使う組み合わせ
+                    </h2>
+                    <div className="rounded-2xl border border-slate-700 bg-slate-800/50 p-4 space-y-3">
+                        {settings.presets.length === 0 ? (
+                            <p className="text-xs leading-relaxed text-slate-400">
+                                まだ登録がありません。日報入力画面で作業者と現場を選び、「＋今の組み合わせを登録」を押すと追加されます。
+                            </p>
+                        ) : (
+                            <ul className="space-y-2">
+                                {settings.presets.map((preset, index) => (
+                                    <li key={preset.name} className="flex items-center justify-between gap-2 rounded-lg bg-slate-700/50 px-3 py-2 text-sm">
+                                        <div className="min-w-0">
+                                            <div className="truncate font-bold">{preset.name}</div>
+                                            <div className="truncate text-xs text-slate-400">
+                                                {preset.workSite} ／ {preset.workerNames.join("、")}
+                                            </div>
+                                        </div>
+                                        <button
+                                            onClick={() =>
+                                                removeItem(
+                                                    settings.presets.map((p) => p.name),
+                                                    index,
+                                                    () => setSettings({ ...settings, presets: settings.presets.filter((_, i) => i !== index) })
+                                                )
+                                            }
+                                            className="shrink-0 text-slate-400 hover:text-red-400"
+                                        >
+                                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                            </svg>
+                                        </button>
+                                    </li>
+                                ))}
+                            </ul>
+                        )}
+                    </div>
+                </section>
+
                 {/* データ引き継ぎ（機種変更） */}
                 <section className="space-y-3">
                     <h2 className="flex items-center gap-2 text-lg font-bold text-white">
