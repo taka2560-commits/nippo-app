@@ -586,20 +586,27 @@ export default function SettingsPage() {
                         {/* 読み込み */}
                         <div className="space-y-2">
                             <div className="text-sm font-bold text-slate-200">② 新しい端末で読み込む</div>
+                            {/* acceptで絞るとLINE・ダウンロード経由のファイルが種類不明扱いになり
+                                選択画面に表示されない端末があるため、種類は指定せず中身で判定する */}
                             <input
                                 ref={fileInputRef}
                                 type="file"
-                                accept=".json,application/json"
                                 onChange={handleSelectBackupFile}
                                 className="hidden"
                             />
                             {!pendingBackup ? (
-                                <button
-                                    onClick={() => fileInputRef.current?.click()}
-                                    className="w-full rounded-xl border border-slate-600 bg-slate-900 px-4 py-3 text-sm font-bold text-slate-200 hover:border-teal-500"
-                                >
-                                    バックアップファイルを選択
-                                </button>
+                                <>
+                                    <button
+                                        onClick={() => fileInputRef.current?.click()}
+                                        className="w-full rounded-xl border border-slate-600 bg-slate-900 px-4 py-3 text-sm font-bold text-slate-200 hover:border-teal-500"
+                                    >
+                                        バックアップファイルを選択
+                                    </button>
+                                    <p className="text-[11px] leading-relaxed text-slate-500">
+                                        「nippo_backup_」で始まるファイルを選んでください。
+                                        LINEで受け取った場合は、先にトーク画面でファイルを開いて端末に保存してから選択してください。
+                                    </p>
+                                </>
                             ) : (
                                 <div className="space-y-3 rounded-xl border border-teal-600/50 bg-slate-900 p-3">
                                     <div className="space-y-1 text-xs text-slate-300">

@@ -244,7 +244,7 @@ export const parseBackup = (text: string): BackupData => {
     try {
         parsed = JSON.parse(text);
     } catch {
-        throw new Error("ファイルを読み込めませんでした。バックアップファイル（.json）を選択してください。");
+        throw new Error("ファイルを読み込めませんでした。「nippo_backup_」で始まるバックアップファイルを選択してください。");
     }
 
     const data = parsed as Partial<BackupData> | null;
