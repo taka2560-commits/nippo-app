@@ -131,6 +131,15 @@ export default function ReportForm() {
         workEntries.length > 0 &&
         workEntries.every((e) => e.content && e.manDays);
 
+    // 未入力項目（送信ボタンを押したときに各欄の下へ表示）
+    const [showErrors, setShowErrors] = useState(false);
+    const [showBulkConfirm, setShowBulkConfirm] = useState(false);
+    const entryErrors = workEntries.map((e) =>
+        [!e.content && "作業内容", !e.manDays && "人工"].filter(Boolean).join("・")
+    );
+    const missingCount =
+        (workerNames.length === 0 ? 1 : 0) + (workSite ? 0 : 1) + entryErrors.filter(Boolean).length;
+
     // 入力済み日付一覧を取得
     const fetchSubmittedDates = useCallback(async () => {
         try {
@@ -310,6 +319,7 @@ export default function ReportForm() {
         setReportDate(newDate);
         setStatus("idle");
         setErrorMessage("");
+        setShowErrors(false);
         loadReportByDate(newDate);
     };
 
@@ -332,6 +342,7 @@ export default function ReportForm() {
         setCopiedFromDate(null);
         setBulkEnabled(false);
         setSuccessMessage(null);
+        setShowErrors(false);
     }, []);
 
     // 作業行の追加
@@ -382,12 +393,30 @@ export default function ReportForm() {
         );
     };
 
+    // 送信ボタン：未入力があれば該当欄へ移動、まとめて登録なら確認画面を挟む
+    const handleSubmitClick = () => {
+        if (status === "submitting") return;
+        if (!isComplete) {
+            setShowErrors(true);
+            const firstId = workerNames.length === 0 ? "field-workers" : !workSite ? "field-site" : "field-entries";
+            document.getElementById(firstId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+            return;
+        }
+        if (bulkPlan.targets.length > 0) {
+            setShowBulkConfirm(true);
+            return;
+        }
+        handleSubmit();
+    };
+
     // 送信処理
     const handleSubmit = async () => {
         if (!isComplete || status === "submitting") return;
 
         setStatus("submitting");
         setErrorMessage("");
+        setShowBulkConfirm(false);
+        setShowErrors(false);
 
         try {
             const reportData: StoredReport = {
@@ -530,6 +559,59 @@ export default function ReportForm() {
             )}
 
             <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+                {/* まとめて登録の確認画面 */}
+                {showBulkConfirm && (
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+                        <div className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-2xl border border-teal-500/30 bg-slate-800 p-5 shadow-2xl">
+                            <h3 className="mb-3 text-base font-bold text-white">
+                                {bulkPlan.targets.length + 1}日分を登録します。よろしいですか？
+                            </h3>
+                            <dl className="space-y-2 text-sm">
+                                <div>
+                                    <dt className="text-[11px] text-slate-400">登録する日</dt>
+                                    <dd className="font-semibold text-teal-300">
+                                        {[reportDate, ...bulkPlan.targets].map(formatShortDate).join("、")}
+                                    </dd>
+                                </div>
+                                {bulkPlan.skipped.length > 0 && (
+                                    <div>
+                                        <dt className="text-[11px] text-slate-400">入力済みのためスキップ</dt>
+                                        <dd className="text-slate-300">{bulkPlan.skipped.map(formatShortDate).join("、")}</dd>
+                                    </div>
+                                )}
+                                <div>
+                                    <dt className="text-[11px] text-slate-400">作業者・現場</dt>
+                                    <dd className="text-white">{workerNames.join("、")} ／ {workSite}</dd>
+                                </div>
+                                <div>
+                                    <dt className="text-[11px] text-slate-400">作業内容</dt>
+                                    <dd className="text-white">
+                                        {workEntries.map((e) => `${e.location ? e.location + " " : ""}${e.content}（${e.manDays}人工）`).join("、")}
+                                    </dd>
+                                </div>
+                                {materials.some((m) => m.name) && (
+                                    <div>
+                                        <dt className="text-[11px] text-slate-400">材料</dt>
+                                        <dd className="text-white">
+                                            {materials.filter((m) => m.name).map((m) => `${m.name}×${m.quantity}`).join("、")}
+                                        </dd>
+                                    </div>
+                                )}
+                            </dl>
+                            <div className="mt-5 flex gap-3">
+                                <button type="button" onClick={() => setShowBulkConfirm(false)}
+                                    className="flex-1 rounded-xl border border-slate-600 py-3 text-sm font-semibold text-slate-300 active:bg-slate-700/50">
+                                    戻って直す
+                                </button>
+                                <button type="button" onClick={handleSubmit}
+                                    className="flex-1 rounded-xl bg-teal-500 py-3 text-sm font-bold text-white active:bg-teal-600">
+                                    登録する
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
                 {/* 削除確認ダイアログ */}
                 {showDeleteConfirm && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-6">
@@ -569,7 +651,9 @@ export default function ReportForm() {
                         </div>
                         <div>
                             <h1 className="text-base font-bold text-white">作業日報入力</h1>
-                            <p className="text-[11px] text-slate-400">日報を入力してください</p>
+                            <p className={`text-[11px] font-semibold ${isExistingReport ? "text-amber-300" : "text-sky-300"}`}>
+                                {formatShortDate(reportDate)} {isExistingReport ? "の日報を編集中" : "の日報を入力中"}
+                            </p>
                         </div>
                         <Link href="/settings" className="ml-auto rounded-full bg-slate-800 p-2 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white">
                             <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
@@ -676,6 +760,7 @@ export default function ReportForm() {
                         </div>
 
                         {/* 作業者名（複数選択） */}
+                        <div id="field-workers" className="space-y-1">
                         <MultiSelectField
                             label="作業者名"
                             options={options.workerNames}
@@ -698,7 +783,13 @@ export default function ReportForm() {
                             }
                         />
 
+                        {showErrors && workerNames.length === 0 && (
+                            <p className="text-xs font-semibold text-red-400">⚠ 作業者を1人以上選んでください</p>
+                        )}
+                        </div>
+
                         {/* 作業現場（グループ化プルダウン） */}
+                        <div id="field-site" className="space-y-1">
                         <GroupedSelectField
                             label="作業現場"
                             value={workSite}
@@ -726,6 +817,11 @@ export default function ReportForm() {
                                 </svg>
                             }
                         />
+
+                        {showErrors && !workSite && (
+                            <p className="text-xs font-semibold text-red-400">⚠ 作業現場を選んでください</p>
+                        )}
+                        </div>
 
                         {/* 区切り線 */}
                         <div className="border-t border-slate-700/50 pt-2">
@@ -764,8 +860,9 @@ export default function ReportForm() {
                         </div>
 
                         {/* 作業内容行リスト */}
-                        <div className="space-y-3">
+                        <div id="field-entries" className="space-y-3">
                             {workEntries.map((entry, index) => (
+                                <div key={entry.id} className="space-y-1">
                                 <WorkEntryRow
                                     key={entry.id}
                                     index={index}
@@ -792,6 +889,12 @@ export default function ReportForm() {
                                     onRemove={() => removeWorkEntry(entry.id)}
                                     canRemove={workEntries.length > 1}
                                 />
+                                {showErrors && entryErrors[index] && (
+                                    <p className="text-xs font-semibold text-red-400">
+                                        ⚠ 作業{index + 1}：{entryErrors[index]}を入力してください
+                                    </p>
+                                )}
+                                </div>
                             ))}
                         </div>
 
@@ -1048,13 +1151,13 @@ export default function ReportForm() {
                     {/* 送信ボタンエリア */}
                     <div className="mt-6 pb-8 space-y-3">
                         <button
-                            onClick={handleSubmit}
-                            disabled={!isComplete || status === "submitting"}
+                            onClick={handleSubmitClick}
+                            disabled={status === "submitting"}
                             className={`
                                 relative w-full rounded-2xl px-6 py-4 text-lg font-bold
                                 transition-all duration-200 shadow-lg
                                 ${!isComplete
-                                    ? "cursor-not-allowed bg-slate-700/50 text-slate-500 shadow-none"
+                                    ? "bg-slate-700/50 text-slate-400 shadow-none active:scale-[0.98]"
                                     : status === "submitting"
                                         ? "cursor-wait bg-sky-600/80 text-white shadow-sky-500/25"
                                         : isExistingReport
@@ -1127,8 +1230,10 @@ export default function ReportForm() {
                         )}
 
                         {!isComplete && !isManDayOver && status !== "submitting" && (
-                            <p className="text-center text-xs text-slate-500">
-                                ※ すべての項目を入力すると送信できます
+                            <p className={`text-center text-xs ${showErrors ? "font-semibold text-red-400" : "text-slate-500"}`}>
+                                {showErrors
+                                    ? `※ 未入力の項目が${missingCount}件あります（赤字の欄）`
+                                    : "※ すべての項目を入力すると送信できます"}
                             </p>
                         )}
 
