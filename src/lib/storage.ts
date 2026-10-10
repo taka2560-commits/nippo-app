@@ -133,7 +133,7 @@ const DEFAULT_SETTINGS: StorageSettings = {
 };
 
 const SETTINGS_KEY = "nippo_settings";
-const REPORTS_KEY = "nippo_reports";
+export const REPORTS_KEY = "nippo_reports";
 
 // 設定（マスタ）関連
 export const getSettings = (): StorageSettings => {
@@ -170,9 +170,7 @@ export const saveSettings = (settings: StorageSettings) => {
 };
 
 // 日報関連
-export const getReports = (): StoredReport[] => {
-    if (typeof window === "undefined") return [];
-    const stored = localStorage.getItem(REPORTS_KEY);
+export const parseReports = (stored: string | null): StoredReport[] => {
     if (!stored) return [];
     try {
         const parsed = JSON.parse(stored);
@@ -180,6 +178,18 @@ export const getReports = (): StoredReport[] => {
     } catch {
         return [];
     }
+};
+
+export const getReports = (): StoredReport[] => {
+    if (typeof window === "undefined") return [];
+    return parseReports(localStorage.getItem(REPORTS_KEY));
+};
+
+// 選択肢を「過去の日報での使用回数が多い順」に並べる（同数は元の順を保つ）
+export const sortByUsage = (options: string[], usedValues: string[]): string[] => {
+    const counts = new Map<string, number>();
+    for (const v of usedValues) counts.set(v, (counts.get(v) ?? 0) + 1);
+    return [...options].sort((a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0));
 };
 
 export const getReportByDate = (date: string): StoredReport | undefined => {
@@ -358,4 +368,130 @@ export const restoreBackup = (backup: BackupData, mode: ImportMode): ImportResul
     localStorage.setItem(REPORTS_KEY, JSON.stringify(reports));
 
     return { reportCount: reports.length, importedReportCount: backup.reports.length };
+};
+
+// 入力途中の下書き（アプリを閉じる・画面を切り替えても続きから再開できるようにする）
+// 日付ごとに1件ずつ保存する。別の日を開いても、書きかけの日の下書きは残る。
+const DRAFT_KEY = "nippo_drafts";
+const DRAFT_MAX_AGE_DAYS = 14;
+const DRAFT_MAX_COUNT = 10;
+
+export interface FormDraft {
+    reportDate: string;
+    workerNames: string[];
+    workSite: string;
+    earlyStart: string;
+    overtimeHours: string;
+    workEntries: { location: string; content: string; manDays: string; overtime: string }[];
+    materials: { name: string; quantity: string }[];
+    remarks: string;
+    savedAt: string;
+}
+
+const isValidDraft = (d: unknown): d is FormDraft => {
+    const x = d as Partial<FormDraft> | null;
+    if (
+        !x ||
+        typeof x !== "object" ||
+        typeof x.reportDate !== "string" ||
+        typeof x.savedAt !== "string" ||
+        !isStringArray(x.workerNames) ||
+        !Array.isArray(x.workEntries) ||
+        !Array.isArray(x.materials)
+    ) {
+        return false;
+    }
+    const ageDays = (Date.now() - new Date(x.savedAt).getTime()) / 86400000;
+    return ageDays <= DRAFT_MAX_AGE_DAYS; // 古い下書き・日時が壊れた下書きは無視
+};
+
+const readDrafts = (): Record<string, FormDraft> => {
+    if (typeof window === "undefined") return {};
+    try {
+        const parsed = JSON.parse(localStorage.getItem(DRAFT_KEY) ?? "{}");
+        const result: Record<string, FormDraft> = {};
+        if (parsed && typeof parsed === "object") {
+            for (const [date, d] of Object.entries(parsed)) {
+                if (isValidDraft(d) && d.reportDate === date) result[date] = d;
+            }
+        }
+        return result;
+    } catch {
+        return {};
+    }
+};
+
+const writeDrafts = (drafts: Record<string, FormDraft>) => {
+    try {
+        const newest = Object.values(drafts)
+            .sort((a, b) => b.savedAt.localeCompare(a.savedAt))
+            .slice(0, DRAFT_MAX_COUNT);
+        localStorage.setItem(DRAFT_KEY, JSON.stringify(Object.fromEntries(newest.map((d) => [d.reportDate, d]))));
+    } catch {
+        // 容量超過などで保存できなくても、入力そのものは止めない
+    }
+};
+
+export const saveDraft = (draft: FormDraft) => {
+    if (typeof window === "undefined") return;
+    writeDrafts({ ...readDrafts(), [draft.reportDate]: draft });
+};
+
+export const clearDraft = (date: string) => {
+    if (typeof window === "undefined") return;
+    const drafts = readDrafts();
+    if (!(date in drafts)) return;
+    delete drafts[date];
+    writeDrafts(drafts);
+};
+
+// date を指定するとその日の下書き、省略すると最後に書いた下書きを返す
+export const getDraft = (date?: string): FormDraft | null => {
+    const drafts = readDrafts();
+    if (date) return drafts[date] ?? null;
+    return Object.values(drafts).sort((a, b) => b.savedAt.localeCompare(a.savedAt))[0] ?? null;
+};
+
+// バックアップの促し（最後に引き継ぎファイルを書き出してから一定期間たったら知らせる）
+const LAST_BACKUP_KEY = "nippo_last_backup";
+const FIRST_SEEN_KEY = "nippo_first_seen";
+const BACKUP_SNOOZE_KEY = "nippo_backup_snooze_until";
+export const BACKUP_REMINDER_DAYS = 30;
+
+export const getLastBackupAt = (): string | null => {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem(LAST_BACKUP_KEY);
+};
+
+export const markBackupDone = () => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(LAST_BACKUP_KEY, new Date().toISOString());
+    localStorage.removeItem(BACKUP_SNOOZE_KEY);
+};
+
+export const snoozeBackupReminder = (days = 7) => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem(BACKUP_SNOOZE_KEY, String(Date.now() + days * 86400000));
+};
+
+export const getBackupReminder = (): { show: boolean; daysSince: number; neverBackedUp: boolean } => {
+    const none = { show: false, daysSince: 0, neverBackedUp: false };
+    if (typeof window === "undefined" || getReports().length === 0) return none;
+
+    const last = getLastBackupAt();
+    let firstSeen = localStorage.getItem(FIRST_SEEN_KEY);
+    if (!firstSeen) {
+        firstSeen = new Date().toISOString();
+        localStorage.setItem(FIRST_SEEN_KEY, firstSeen);
+    }
+    const base = new Date(last ?? firstSeen).getTime();
+    if (isNaN(base)) return none;
+
+    const daysSince = Math.floor((Date.now() - base) / 86400000);
+    const snoozeUntil = Number(localStorage.getItem(BACKUP_SNOOZE_KEY) ?? 0);
+    return {
+        show: daysSince >= BACKUP_REMINDER_DAYS && Date.now() >= snoozeUntil,
+        daysSince,
+        neverBackedUp: !last,
+    };
 };

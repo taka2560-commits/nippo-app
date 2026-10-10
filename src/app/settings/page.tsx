@@ -12,6 +12,8 @@ import {
     ImportMode,
     createBackup,
     getBackupFileName,
+    getLastBackupAt,
+    markBackupDone,
     parseBackup,
     restoreBackup,
 } from "@/lib/storage";
@@ -34,11 +36,13 @@ export default function SettingsPage() {
     const [pendingBackup, setPendingBackup] = useState<BackupData | null>(null);
     const [transferMessage, setTransferMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
     const [canShareFile, setCanShareFile] = useState(false);
+    const [lastBackupAt, setLastBackupAt] = useState<string | null>(null);
 
     // 設定読み込み
     useEffect(() => {
         const currentSettings = getSettings();
         setSettings(currentSettings);
+        setLastBackupAt(getLastBackupAt());
 
         // ファイル共有（LINE・メール・AirDrop等）に対応した端末か判定
         try {
@@ -68,6 +72,8 @@ export default function SettingsPage() {
         a.click();
         a.remove();
         setTimeout(() => URL.revokeObjectURL(url), 1000);
+        markBackupDone();
+        setLastBackupAt(getLastBackupAt());
         setTransferMessage({ type: "success", text: `「${file.name}」を保存しました。新しい端末にこのファイルを移してください。` });
     };
 
@@ -75,6 +81,8 @@ export default function SettingsPage() {
         const file = buildBackupFile();
         try {
             await navigator.share({ files: [file], title: "日報バックアップ" });
+            markBackupDone();
+            setLastBackupAt(getLastBackupAt());
             setTransferMessage({ type: "success", text: "バックアップファイルを送信しました。新しい端末で受け取って読み込んでください。" });
         } catch (e) {
             // ユーザーが共有をキャンセルした場合は何もしない
@@ -608,6 +616,9 @@ export default function SettingsPage() {
                         {/* 書き出し */}
                         <div className="space-y-2">
                             <div className="text-sm font-bold text-slate-200">① 古い端末で書き出す</div>
+                            <p className="text-[11px] text-slate-500">
+                                前回のバックアップ：{lastBackupAt ? formatDateTime(lastBackupAt) : "まだありません"}
+                            </p>
                             {canShareFile && (
                                 <button
                                     onClick={handleShareBackup}
@@ -708,7 +719,10 @@ export default function SettingsPage() {
             </div>
 
             {/* フッター保存ボタン */}
-            <div className="fixed bottom-0 left-0 right-0 border-t border-slate-800 bg-slate-900/80 p-4 backdrop-blur-xl">
+            <div
+                className="fixed left-0 right-0 border-t border-slate-800 bg-slate-900/80 p-4 backdrop-blur-xl"
+                style={{ bottom: "calc(3.75rem + env(safe-area-inset-bottom))" }}
+            >
                 <div className="mx-auto max-w-md">
                     <button
                         onClick={handleSave}

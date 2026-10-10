@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import Link from "next/link";
 import { generateMonthlyReportData, exportToExcel, exportToPDF } from "@/lib/export";
-import { getSettings } from "@/lib/storage";
+import { useReports } from "@/lib/use-reports";
+import { formatShortDate, getMissingWeekdays, getPeriodOfMonth } from "@/lib/dates";
 
 export const ExportControl = () => {
     // 現在の日付から初期値を設定（例: 今日が2/18なら、2月度(1/16-2/15)または3月度(2/16-3/15)）
@@ -15,6 +17,19 @@ export const ExportControl = () => {
 
     const [year, setYear] = useState(initialYear);
     const [month, setMonth] = useState(initialMonth);
+
+    // 選択中の月度に、入力していない平日がないか
+    const reports = useReports();
+    const period = getPeriodOfMonth(year, month);
+    const missing = useMemo(
+        () => getMissingWeekdays(period.from, period.to, (reports ?? []).map((r) => r.reportDate)),
+        [reports, period.from, period.to]
+    );
+    const inPeriod = (reports ?? []).filter((r) => r.reportDate >= period.from && r.reportDate <= period.to);
+    const totalManDays = inPeriod.reduce(
+        (sum, r) => sum + r.workEntries.reduce((s, e) => s + (e.manDays || 0), 0),
+        0
+    );
 
     const handleExportExcel = () => {
         const data = generateMonthlyReportData(year, month);
@@ -81,6 +96,47 @@ export const ExportControl = () => {
             <p className="mt-2 text-[10px] text-slate-500">
                 ※ 指定した月度の前月16日〜当月15日のデータを集計します。
             </p>
+
+            {/* この月度の集計と、入力漏れの確認 */}
+            <div className="mt-4 space-y-3 border-t border-slate-700 pt-4">
+                <div className="grid grid-cols-2 gap-3 text-center">
+                    <div className="rounded-xl bg-slate-900/50 p-2">
+                        <div className="text-[11px] text-slate-400">入力した日</div>
+                        <div className="text-lg font-bold text-white">{inPeriod.length}日</div>
+                    </div>
+                    <div className="rounded-xl bg-slate-900/50 p-2">
+                        <div className="text-[11px] text-slate-400">人工の合計</div>
+                        <div className="text-lg font-bold text-white">{totalManDays.toFixed(2)}</div>
+                    </div>
+                </div>
+                {reports !== null && (
+                    missing.length === 0 ? (
+                        <p className="rounded-xl bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">
+                            ✓ この月度に入力漏れの平日はありません
+                        </p>
+                    ) : (
+                        <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-3">
+                            <p className="mb-2 text-xs font-bold text-amber-300">
+                                ⚠ 未入力の平日が{missing.length}日あります（タップで入力）
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                                {missing.map((d) => (
+                                    <Link
+                                        key={d}
+                                        href={`/?date=${d}`}
+                                        className="rounded-full border border-amber-500/40 bg-slate-900/60 px-3 py-1 text-xs font-semibold text-amber-200 active:bg-amber-500/20"
+                                    >
+                                        {formatShortDate(d)}
+                                    </Link>
+                                ))}
+                            </div>
+                            <p className="mt-2 text-[10px] text-amber-200/70">
+                                ※ 最初に入力した日以降の平日を表示します。祝日や休みの日も含まれます。
+                            </p>
+                        </div>
+                    )
+                )}
+            </div>
         </div>
     );
 };
