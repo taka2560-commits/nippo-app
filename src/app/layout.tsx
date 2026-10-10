@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import BottomNav from "@/components/BottomNav";
 
 export const metadata: Metadata = {
   title: "作業日報入力 | 日報自動入力システム",
@@ -17,6 +18,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
+  viewportFit: "cover",
   themeColor: "#0f172a",
 };
 
@@ -27,7 +29,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="ja">
-      <body className="antialiased">{children}</body>
+      <body className="antialiased">
+        {/* 下部タブバーの高さ（3.75rem）ぶん、内容の下に余白を取る */}
+        <div style={{ paddingBottom: "calc(3.75rem + env(safe-area-inset-bottom))" }}>{children}</div>
+        <BottomNav />
+      </body>
     </html>
   );
 }

@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import Link from "next/link";
 import MultiSelectField from "./MultiSelectField";
 import GroupedSelectField from "./GroupedSelectField";
 import WorkEntryRow from "./WorkEntryRow";
 import SuccessOverlay from "./SuccessOverlay";
 import CalendarPicker from "./CalendarPicker";
-import { ExportControl } from "./ExportControl";
+import VoiceInputButton from "./VoiceInputButton";
+import { addDays, isWeekend, formatShortDate, getMissingWeekdays, todayStr, toDateStr } from "@/lib/dates";
 import {
     getSettings,
     saveSettings,
@@ -15,6 +16,12 @@ import {
     getReportByDate,
     deleteReport,
     getReports,
+    getDraft,
+    saveDraft,
+    clearDraft,
+    sortByUsage,
+    getBackupReminder,
+    snoozeBackupReminder,
     SiteGroup,
     StorageSettings,
     StoredReport,
@@ -41,19 +48,8 @@ interface Options {
 // まとめて登録できる最大日数
 const MAX_BULK_DAYS = 31;
 
-// "2026-09-29" の日付を n 日ずらす（端末のタイムゾーンでずれないよう年月日で計算）
-const addDays = (date: string, n: number): string => {
-    const [y, m, d] = date.split("-").map(Number);
-    const dt = new Date(y, m - 1, d + n);
-    const pad = (v: number) => String(v).padStart(2, "0");
-    return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
-};
-
-const isWeekend = (date: string): boolean => {
-    const [y, m, d] = date.split("-").map(Number);
-    const dow = new Date(y, m - 1, d).getDay();
-    return dow === 0 || dow === 6;
-};
+// 何も入力していない状態のフォーム内容（下書きを残すかどうかの判定の基準）
+const EMPTY_SIG = JSON.stringify([[], "", "0", "0", [["", "", "", "0"]], [], ""]);
 
 interface MaterialEntry {
     id: number;
@@ -79,10 +75,7 @@ export default function ReportForm() {
     const [options, setOptions] = useState<Options | null>(null);
 
     // フォーム値
-    const [reportDate, setReportDate] = useState(() => {
-        const today = new Date();
-        return today.toISOString().split("T")[0];
-    });
+    const [reportDate, setReportDate] = useState(() => todayStr());
     const [workerNames, setWorkerNames] = useState<string[]>([]);
     const [workSite, setWorkSite] = useState("");
     const [earlyStart, setEarlyStart] = useState("0");
@@ -107,6 +100,14 @@ export default function ReportForm() {
     const [bulkEndDate, setBulkEndDate] = useState("");
     const [bulkSkipWeekends, setBulkSkipWeekends] = useState(false);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
+    const [lastSavedDate, setLastSavedDate] = useState<string | null>(null);
+
+    // 下書き・バックアップの促し
+    const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
+    const [backupReminder, setBackupReminder] = useState({ show: false, daysSince: 0, neverBackedUp: false });
+    // 「保存済みの状態」と比べて変更があるときだけ下書きを残す
+    const baselineSig = useRef(EMPTY_SIG);
+    const resyncBaseline = useRef(false); // true の間は、次に描画された内容を「保存済みの状態」とみなす
 
     // 入力済み日付一覧
     const [submittedDates, setSubmittedDates] = useState<string[]>([]);
@@ -140,6 +141,48 @@ export default function ReportForm() {
     const missingCount =
         (workerNames.length === 0 ? 1 : 0) + (workSite ? 0 : 1) + entryErrors.filter(Boolean).length;
 
+    // 入力内容の署名（下書きを残すかどうかの判定用）
+    const formSig = JSON.stringify([
+        workerNames,
+        workSite,
+        earlyStart,
+        overtimeHours,
+        workEntries.map((e) => [e.location, e.content, e.manDays, e.overtime]),
+        materials.map((m) => [m.name, m.quantity]),
+        remarks,
+    ]);
+
+    // 入力のたびに下書きを自動保存（保存済みと同じ内容に戻ったら下書きは消す）
+    useEffect(() => {
+        if (!options) return;
+        if (resyncBaseline.current) {
+            baselineSig.current = formSig;
+            resyncBaseline.current = false;
+            return;
+        }
+        if (status === "success" || status === "submitting") return;
+        if (formSig === baselineSig.current) {
+            clearDraft(reportDate);
+            return;
+        }
+        saveDraft({
+            reportDate,
+            workerNames,
+            workSite,
+            earlyStart,
+            overtimeHours,
+            workEntries: workEntries.map((e) => ({
+                location: e.location,
+                content: e.content,
+                manDays: e.manDays,
+                overtime: e.overtime,
+            })),
+            materials: materials.map((m) => ({ name: m.name, quantity: m.quantity })),
+            remarks,
+            savedAt: new Date().toISOString(),
+        });
+    }, [formSig, reportDate, options, status]); // eslint-disable-line react-hooks/exhaustive-deps
+
     // 入力済み日付一覧を取得
     const fetchSubmittedDates = useCallback(async () => {
         try {
@@ -151,13 +194,54 @@ export default function ReportForm() {
         }
     }, []);
 
-    // 選択肢を取得
+    // 下書きをフォームに反映
+    const applyDraft = useCallback((draft: NonNullable<ReturnType<typeof getDraft>>) => {
+        setReportDate(draft.reportDate);
+        setWorkerNames(draft.workerNames);
+        setWorkSite(draft.workSite);
+        setEarlyStart(draft.earlyStart || "0");
+        setOvertimeHours(draft.overtimeHours || "0");
+        const entries = draft.workEntries.map((e) => ({
+            id: entryIdCounter++,
+            location: e.location ?? "",
+            content: e.content ?? "",
+            manDays: e.manDays ?? "",
+            overtime: e.overtime ?? "0",
+        }));
+        setWorkEntries(
+            entries.length > 0
+                ? entries
+                : [{ id: entryIdCounter++, location: "", content: "", manDays: "", overtime: "0" }]
+        );
+        setMaterials(
+            draft.materials.map((m) => ({ id: materialIdCounter++, name: m.name ?? "", quantity: m.quantity ?? "1" }))
+        );
+        setRemarks(draft.remarks ?? "");
+        setIsExistingReport(!!getReportByDate(draft.reportDate));
+        setDraftSavedAt(draft.savedAt);
+        baselineSig.current = EMPTY_SIG; // 下書きは「変更あり」として残す
+        resyncBaseline.current = false;
+    }, []);
+
+    // 初回表示：選択肢・入力済み日付を読み込み、?date= の指定や書きかけの下書きがあれば開く
     useEffect(() => {
-        const settings = getSettings();
-        setOptions(settings);
-        // 入力済み日付一覧を初回取得
+        setOptions(getSettings());
         fetchSubmittedDates();
-    }, [fetchSubmittedDates]);
+        setBackupReminder(getBackupReminder());
+
+        const dateParam = new URLSearchParams(window.location.search).get("date");
+        const targetDate = dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam) ? dateParam : null;
+        // 日付の指定があればその日の下書き、なければ最後に書いた下書き
+        const draft = getDraft(targetDate ?? undefined);
+        if (draft) {
+            applyDraft(draft);
+        } else {
+            const date = targetDate ?? todayStr();
+            setReportDate(date);
+            loadReportByDate(date);
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [fetchSubmittedDates, applyDraft]);
 
     // 保存済み日報の内容をフォームに反映（再編集・前回コピーで共用）
     const fillFormFromReport = useCallback((report: StoredReport, includeRemarks: boolean) => {
@@ -202,7 +286,15 @@ export default function ReportForm() {
         setIsLoading(true);
         setIsExistingReport(false);
         setCopiedFromDate(null);
+        setDraftSavedAt(null);
         try {
+            // その日の書きかけがあれば、保存済みの内容より優先して開く
+            const draft = getDraft(date);
+            if (draft) {
+                applyDraft(draft);
+                return;
+            }
+            resyncBaseline.current = true;
             const report = getReportByDate(date);
 
             if (report) {
@@ -226,7 +318,14 @@ export default function ReportForm() {
         } finally {
             setIsLoading(false);
         }
-    }, [fillFormFromReport]);
+    }, [fillFormFromReport, applyDraft]);
+
+    // 下書きを捨てて、保存済みの内容（なければ空）に戻す
+    const discardDraft = () => {
+        clearDraft(reportDate);
+        loadReportByDate(reportDate);
+        // loadReportByDate は下書きを先に探すので、消してから呼ぶ
+    };
 
     // 選択中の日付より前で、いちばん新しい日報（連続する現場のコピー元）
     const previousReport = useMemo(() => {
@@ -271,6 +370,30 @@ export default function ReportForm() {
         return tooLong ? { targets: [], skipped: [], tooLong } : { targets, skipped, tooLong };
     }, [bulkEnabled, bulkEndDate, bulkSkipWeekends, reportDate, submittedDates]);
 
+    // 作業内容・場所・材料の候補は、よく使うものを上にする
+    const sortedOptions = useMemo(() => {
+        if (!options) return null;
+        const reports = getReports();
+        return {
+            workContents: sortByUsage(options.workContents, reports.flatMap((r) => r.workEntries.map((e) => e.content))),
+            locationOptions: sortByUsage(
+                options.locationOptions || [],
+                reports.flatMap((r) => r.workEntries.map((e) => e.location).filter(Boolean))
+            ),
+            materialOptions: sortByUsage(options.materialOptions, reports.flatMap((r) => r.materials.map((m) => m.name))),
+        };
+    // submittedDates は保存のたびに更新される（使用回数の再計算のきっかけ）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [options, submittedDates]);
+
+    // 選択中の月の、入力していない平日
+    const missingThisMonth = useMemo(() => {
+        const [y, m] = reportDate.split("-").map(Number);
+        const from = toDateStr(new Date(y, m - 1, 1));
+        const to = toDateStr(new Date(y, m, 0));
+        return getMissingWeekdays(from, to, submittedDates);
+    }, [reportDate, submittedDates]);
+
     const toggleBulk = (enabled: boolean) => {
         setBulkEnabled(enabled);
         if (enabled && !(bulkEndDate > reportDate)) setBulkEndDate(addDays(reportDate, 1));
@@ -283,8 +406,23 @@ export default function ReportForm() {
         setOptions(updated);
     };
 
+    // 作業者を変えたとき、作業が1行だけで人工が未入力（または前回の自動入力のまま）なら、人数ぶんの人工を自動で入れる
+    const handleWorkersChange = (names: string[]) => {
+        const toManDays = (n: number) => (n > 0 ? n.toFixed(1) : "");
+        const prevAuto = toManDays(workerNames.length);
+        const next = toManDays(names.length);
+        setWorkerNames(names);
+        if (!options || workEntries.length !== 1) return;
+        const current = workEntries[0].manDays;
+        if (current !== "" && current !== prevAuto) return; // 手で選んだ人工は上書きしない
+        const value = options.manDayOptions.includes(next) ? next : "";
+        if (value !== current) {
+            setWorkEntries([{ ...workEntries[0], manDays: value }]);
+        }
+    };
+
     const applyPreset = (preset: WorkPreset) => {
-        setWorkerNames(preset.workerNames);
+        handleWorkersChange(preset.workerNames);
         setWorkSite(preset.workSite);
     };
 
@@ -307,13 +445,6 @@ export default function ReportForm() {
         preset.workerNames.length === workerNames.length &&
         preset.workerNames.every((n) => workerNames.includes(n));
 
-    // "2026-09-29" → "9/29（火）"
-    const formatShortDate = (date: string) => {
-        const [y, m, d] = date.split("-").map(Number);
-        const week = ["日", "月", "火", "水", "木", "金", "土"][new Date(y, m - 1, d).getDay()];
-        return `${m}/${d}（${week}）`;
-    };
-
     // 日付変更ハンドラ
     const handleDateChange = (newDate: string) => {
         setReportDate(newDate);
@@ -322,28 +453,6 @@ export default function ReportForm() {
         setShowErrors(false);
         loadReportByDate(newDate);
     };
-
-    // フォームリセット
-    const resetForm = useCallback(() => {
-        const today = new Date();
-        setReportDate(today.toISOString().split("T")[0]);
-        setWorkerNames([]);
-        setWorkSite("");
-        setEarlyStart("0");
-        setOvertimeHours("0");
-        setWorkEntries([
-            { id: entryIdCounter++, location: "", content: "", manDays: "", overtime: "0" },
-        ]);
-        setMaterials([]);
-        setRemarks("");
-        setStatus("idle");
-        setErrorMessage("");
-        setIsExistingReport(false);
-        setCopiedFromDate(null);
-        setBulkEnabled(false);
-        setSuccessMessage(null);
-        setShowErrors(false);
-    }, []);
 
     // 作業行の追加
     const addWorkEntry = () => {
@@ -450,7 +559,13 @@ export default function ReportForm() {
             setSuccessMessage(
                 bulkPlan.targets.length > 0 ? `${bulkPlan.targets.length + 1}日分の日報を保存しました` : null
             );
+            setLastSavedDate(bulkPlan.targets.length > 0 ? bulkPlan.targets[bulkPlan.targets.length - 1] : reportDate);
             setBulkEnabled(false);
+
+            // 保存できたので下書きは不要（保存した内容を「保存済みの状態」にする）
+            clearDraft(reportDate);
+            setDraftSavedAt(null);
+            resyncBaseline.current = true;
 
             // --- 手入力された新しい項目を記憶する処理 ---
             if (options) {
@@ -504,12 +619,47 @@ export default function ReportForm() {
         }
     };
 
+    // 保存完了画面を閉じる：保存した内容を再編集モードで表示したままにする
+    const closeSuccess = () => {
+        setStatus("idle");
+        setSuccessMessage(null);
+        setIsExistingReport(true);
+        setCopiedFromDate(null);
+    };
+
+    // 保存完了画面から翌日へ：翌日に日報があればそれを開き、なければ今保存した内容をコピーして始める
+    const goNextDay = () => {
+        const base = lastSavedDate ?? reportDate;
+        const next = addDays(base, 1);
+        const source = getReportByDate(base);
+        setStatus("idle");
+        setSuccessMessage(null);
+        setErrorMessage("");
+        setShowErrors(false);
+        setBulkEnabled(false);
+        setReportDate(next);
+        if (getReportByDate(next) || getDraft(next) || !source) {
+            loadReportByDate(next);
+        } else {
+            setDraftSavedAt(null);
+            setIsExistingReport(false);
+            fillFormFromReport(source, false);
+            setCopiedFromDate(source.reportDate);
+            baselineSig.current = EMPTY_SIG;
+            resyncBaseline.current = false;
+        }
+        window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+
     // 日報削除処理
     const handleDelete = async () => {
         if (!isExistingReport || isDeleting) return;
         setIsDeleting(true);
         try {
             deleteReport(reportDate);
+            clearDraft(reportDate);
+            setDraftSavedAt(null);
+            resyncBaseline.current = true;
 
             // 削除成功 → フォームリセット & 日付一覧更新
             setWorkerNames([]);
@@ -549,9 +699,13 @@ export default function ReportForm() {
         <>
             {/* 成功オーバーレイ */}
             {status === "success" && (
-                <SuccessOverlay 
-                    onComplete={resetForm} 
-                    reportDate={reportDate}
+                <SuccessOverlay
+                    onComplete={closeSuccess}
+                    onNextDay={goNextDay}
+                    nextDayLabel={`${formatShortDate(addDays(lastSavedDate ?? reportDate, 1))}を入力する（内容をコピー）`}
+                    message={successMessage ?? (isExistingReport ? "日報を更新しました" : "日報を保存しました")}
+                    // Googleカレンダーへの追加は1日分のみ（まとめて登録のときは出さない）
+                    reportDate={successMessage ? undefined : reportDate}
                     workSite={workSite}
                     workContents={workEntries.map(e => e.content).filter(Boolean).join("\n")}
                     workerNames={workerNames}
@@ -667,6 +821,55 @@ export default function ReportForm() {
                 {/* フォーム */}
                 <main className="mx-auto max-w-lg px-4 py-4">
                     <div className="space-y-4">
+                        {/* バックアップの促し */}
+                        {backupReminder.show && (
+                            <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-3 text-xs text-sky-100">
+                                <p className="font-bold">💾 バックアップを取っておきましょう</p>
+                                <p className="mt-0.5 text-sky-200/80">
+                                    {backupReminder.neverBackedUp
+                                        ? `まだ一度もバックアップしていません（使い始めて${backupReminder.daysSince}日）。`
+                                        : `前回のバックアップから${backupReminder.daysSince}日たちました。`}
+                                    端末の故障や買い替えに備えて、ファイルに保存できます。
+                                </p>
+                                <div className="mt-2 flex gap-2">
+                                    <Link
+                                        href="/settings"
+                                        className="rounded-lg bg-sky-500 px-3 py-1.5 font-bold text-white active:bg-sky-600"
+                                    >
+                                        バックアップする
+                                    </Link>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            snoozeBackupReminder(7);
+                                            setBackupReminder({ ...backupReminder, show: false });
+                                        }}
+                                        className="rounded-lg border border-sky-400/40 px-3 py-1.5 font-semibold text-sky-200 active:bg-sky-500/20"
+                                    >
+                                        あとで（7日間表示しない）
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* 下書きを復元したときの案内 */}
+                        {draftSavedAt && (
+                            <div className="flex items-center gap-2 rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-200">
+                                <span className="min-w-0 flex-1">
+                                    📝 入力途中の内容を復元しました（{new Date(draftSavedAt).toLocaleString("ja-JP", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })} に自動保存）
+                                </span>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        if (confirm("書きかけの内容を破棄して、保存済みの状態に戻しますか？")) discardDraft();
+                                    }}
+                                    className="shrink-0 rounded-lg border border-violet-400/40 px-2 py-1 font-semibold active:bg-violet-500/20"
+                                >
+                                    破棄
+                                </button>
+                            </div>
+                        )}
+
                         {/* 日付選択カレンダー */}
                         <div className="space-y-1.5">
                             <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-300 uppercase tracking-wider">
@@ -676,12 +879,37 @@ export default function ReportForm() {
                                 作業日
                             </label>
                             <CalendarPicker
+                                key={reportDate.slice(0, 7)}
                                 value={reportDate}
                                 onChange={handleDateChange}
                                 submittedDates={submittedDates}
                             />
                             {isLoading && (
                                 <p className="text-[11px] text-sky-400 animate-pulse">📋 日報データを読み込み中...</p>
+                            )}
+                            {missingThisMonth.length > 0 && !isLoading && (
+                                <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+                                    <p className="text-xs font-bold text-amber-300">
+                                        ⚠ この月の未入力の平日：{missingThisMonth.length}日（タップで開く）
+                                    </p>
+                                    <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                        {missingThisMonth.slice(0, 8).map((d) => (
+                                            <button
+                                                key={d}
+                                                type="button"
+                                                onClick={() => handleDateChange(d)}
+                                                className="rounded-full border border-amber-500/40 bg-slate-900/60 px-2.5 py-1 text-[11px] font-semibold text-amber-200 active:bg-amber-500/20"
+                                            >
+                                                {formatShortDate(d)}
+                                            </button>
+                                        ))}
+                                        {missingThisMonth.length > 8 && (
+                                            <Link href="/history" className="px-1 py-1 text-[11px] text-amber-300 underline">
+                                                ほか{missingThisMonth.length - 8}日（履歴で見る）
+                                            </Link>
+                                        )}
+                                    </div>
+                                </div>
                             )}
                             {isExistingReport && !isLoading && (
                                 <div className="flex items-center gap-2 rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-xs text-amber-300">
@@ -765,7 +993,7 @@ export default function ReportForm() {
                             label="作業者名"
                             options={options.workerNames}
                             selectedValues={workerNames}
-                            onChange={setWorkerNames}
+                            onChange={handleWorkersChange}
                             icon={
                                 <svg
                                     className="h-4 w-4"
@@ -870,8 +1098,8 @@ export default function ReportForm() {
                                     content={entry.content}
                                     manDays={entry.manDays}
                                     overtime={entry.overtime}
-                                    locationOptions={options.locationOptions || []}
-                                    contentOptions={options.workContents}
+                                    locationOptions={sortedOptions?.locationOptions ?? options.locationOptions ?? []}
+                                    contentOptions={sortedOptions?.workContents ?? options.workContents}
                                     manDayOptions={options.manDayOptions}
                                     overtimeOptions={options.overtimeOptions}
                                     onLocationChange={(val) =>
@@ -1006,7 +1234,7 @@ export default function ReportForm() {
                                                 className={`w-full rounded-xl border-2 px-3 py-2.5 text-base font-medium transition-all duration-200 focus:outline-none focus:ring-4 ${mat.name ? "border-emerald-500/50 bg-emerald-500/10 text-white focus:ring-emerald-500/20" : "border-slate-600/50 bg-slate-800/50 text-slate-400 focus:border-sky-500/50 focus:ring-sky-500/20"}`}
                                             />
                                             <datalist id={`material-list-${mat.id}`}>
-                                                {options.materialOptions.map((opt) => (
+                                                {(sortedOptions?.materialOptions ?? options.materialOptions).map((opt) => (
                                                     <option key={opt} value={opt} />
                                                 ))}
                                             </datalist>
@@ -1052,7 +1280,14 @@ export default function ReportForm() {
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" />
                                 </svg>
                                 備考
-                                <span className="ml-auto text-[10px] font-normal text-slate-500 normal-case">任意</span>
+                                <span className="ml-auto flex items-center gap-2">
+                                    <VoiceInputButton
+                                        onText={(text) =>
+                                            setRemarks((prev) => (prev && !prev.endsWith("\n") ? `${prev}\n${text}` : prev + text))
+                                        }
+                                    />
+                                    <span className="text-[10px] font-normal text-slate-500 normal-case">任意</span>
+                                </span>
                             </label>
                             <textarea
                                 value={remarks}
@@ -1237,18 +1472,8 @@ export default function ReportForm() {
                             </p>
                         )}
 
-                        {/* 月報エクスポート */}
-                        <div className="mt-8 mb-4 border-t border-slate-700/50 pt-8">
-                            <ExportControl />
-                        </div>
                     </div>
 
-                    {status === "success" && (
-                        <SuccessOverlay
-                            onComplete={() => setStatus("idle")}
-                            message={successMessage ?? (isExistingReport ? "日報を更新しました" : "日報を保存しました")}
-                        />
-                    )}
                 </main>
             </div>
         </>

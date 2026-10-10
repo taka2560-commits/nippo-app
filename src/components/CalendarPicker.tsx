@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { getMissingWeekdays, todayStr } from "@/lib/dates";
 
 interface CalendarPickerProps {
     value: string;
@@ -22,8 +23,16 @@ export default function CalendarPicker({
         [submittedDates]
     );
 
-    const today = new Date();
-    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    const today = todayStr();
+
+    // 表示中の月で、入力していない平日（印を付ける）
+    const missingSet = useMemo(() => {
+        const pad = (n: number) => String(n).padStart(2, "0");
+        const from = `${viewYear}-${pad(viewMonth + 1)}-01`;
+        const last = new Date(viewYear, viewMonth + 1, 0).getDate();
+        const to = `${viewYear}-${pad(viewMonth + 1)}-${pad(last)}`;
+        return new Set(getMissingWeekdays(from, to, submittedDates));
+    }, [viewYear, viewMonth, submittedDates]);
 
     const calendarDays = useMemo(() => {
         const firstDay = new Date(viewYear, viewMonth, 1);
@@ -85,8 +94,9 @@ export default function CalendarPicker({
                     if (day === null) return <div key={`e-${idx}`} className="h-9" />;
                     const dateStr = formatDate(day);
                     const isSelected = dateStr === value;
-                    const isToday = dateStr === todayStr;
+                    const isToday = dateStr === today;
                     const isSubmitted = submittedSet.has(dateStr);
+                    const isMissing = missingSet.has(dateStr);
                     const dow = idx % 7;
 
                     return (
@@ -106,6 +116,9 @@ export default function CalendarPicker({
                             {isSubmitted && !isSelected && (
                                 <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full bg-emerald-400" />
                             )}
+                            {isMissing && !isSelected && (
+                                <span className="absolute bottom-0.5 left-1/2 -translate-x-1/2 h-1 w-1 rounded-full bg-amber-400" />
+                            )}
                         </button>
                     );
                 })}
@@ -115,6 +128,9 @@ export default function CalendarPicker({
             <div className="mt-2 flex items-center justify-center gap-3 text-[10px] text-slate-500">
                 <span className="flex items-center gap-1">
                     <span className="h-2 w-2 rounded-sm bg-emerald-500/30 border border-emerald-500/50" />入力済
+                </span>
+                <span className="flex items-center gap-1">
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-400" />未入力の平日
                 </span>
                 <span className="flex items-center gap-1">
                     <span className="h-2 w-2 rounded-sm bg-sky-500" />選択中

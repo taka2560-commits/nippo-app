@@ -4,6 +4,9 @@ import { useEffect, useState } from "react";
 
 interface SuccessOverlayProps {
     onComplete: () => void;
+    // 指定すると「翌日を入力する」ボタンを表示（翌日の日付を渡す）
+    onNextDay?: () => void;
+    nextDayLabel?: string;
     message?: string;
     reportDate?: string;
     workSite?: string;
@@ -13,6 +16,8 @@ interface SuccessOverlayProps {
 
 export default function SuccessOverlay({ 
     onComplete, 
+    onNextDay,
+    nextDayLabel,
     message = "本日の日報入力完了",
     reportDate,
     workSite,
@@ -30,6 +35,11 @@ export default function SuccessOverlay({
         setVisible(false);
         // Force Cache Busting - v1.1
         setTimeout(onComplete, 500); // フェードアウト後にリセット
+    };
+
+    const handleNextDay = () => {
+        setVisible(false);
+        setTimeout(() => onNextDay?.(), 300);
     };
 
     const handleCalendarClick = () => {
@@ -105,10 +115,24 @@ export default function SuccessOverlay({
                         {message}
                     </h1>
 
+                    {/* 翌日へ進むボタン（連続する現場向け） */}
+                    {onNextDay && (
+                        <button
+                            onClick={handleNextDay}
+                            className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white text-teal-600 px-6 py-4 font-bold shadow-lg transition-transform active:scale-95"
+                        >
+                            {nextDayLabel ?? "翌日を入力する"}
+                        </button>
+                    )}
+
                     {/* 閉じる（次へ）ボタン */}
                     <button
                         onClick={handleClose}
-                        className="flex w-full items-center justify-center gap-2 rounded-2xl bg-white text-teal-600 px-6 py-4 font-bold shadow-lg transition-transform active:scale-95"
+                        className={
+                            onNextDay
+                                ? "flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-white/30 bg-white/10 text-white px-6 py-3 font-bold backdrop-blur-sm transition-transform active:scale-95"
+                                : "flex w-full items-center justify-center gap-2 rounded-2xl bg-white text-teal-600 px-6 py-4 font-bold shadow-lg transition-transform active:scale-95"
+                        }
                     >
                         入力画面に戻る
                     </button>
