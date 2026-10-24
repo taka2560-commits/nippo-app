@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { generateMonthlyReportData, exportToExcel, exportToPDF } from "@/lib/export";
-import { useReports } from "@/lib/use-reports";
+import { useReports, useSettings } from "@/lib/use-reports";
 import { formatShortDate, getMissingWeekdays, getPeriodOfMonth } from "@/lib/dates";
+import { buildMonthlySheet, defaultPrescribedDays } from "@/lib/monthly-sheet";
+import { getReports, getSettings, saveSettings } from "@/lib/storage";
 
 export const ExportControl = () => {
     // 現在の日付から初期値を設定（例: 今日が2/18なら、2月度(1/16-2/15)または3月度(2/16-3/15)）
@@ -36,9 +38,36 @@ export const ExportControl = () => {
         exportToExcel(data, year, month);
     };
 
+    // 月報PDFの右上に表示する氏名と、月度ごとの規定出勤日数（入力した内容は端末に保存して次回も使う）
+    const settings = useSettings();
+    const periodKey = `${year}-${String(month).padStart(2, "0")}`;
+    const [nameInput, setNameInput] = useState<string | null>(null);
+    const [daysInput, setDaysInput] = useState<{ key: string; value: string } | null>(null);
+    const reporterName = nameInput ?? settings?.reporterName ?? "";
+    const savedDays = settings?.prescribedDays[periodKey];
+    const daysValue = daysInput?.key === periodKey ? daysInput.value : savedDays === undefined ? "" : String(savedDays);
+    const defaultDays = defaultPrescribedDays(year, month);
+
+    const changeName = (value: string) => {
+        setNameInput(value);
+        saveSettings({ ...getSettings(), reporterName: value });
+    };
+    const changeDays = (value: string) => {
+        const digits = value.replace(/[^0-9]/g, "").slice(0, 2);
+        setDaysInput({ key: periodKey, value: digits });
+        const current = getSettings();
+        const prescribedDays = { ...current.prescribedDays };
+        if (digits === "") delete prescribedDays[periodKey];
+        else prescribedDays[periodKey] = parseInt(digits, 10);
+        saveSettings({ ...current, prescribedDays });
+    };
+
     const handleExportPDF = async () => {
-        const data = generateMonthlyReportData(year, month);
-        await exportToPDF(data, year, month);
+        const sheet = buildMonthlySheet(getReports(), year, month, {
+            reporterName,
+            prescribedDays: savedDays,
+        });
+        await exportToPDF(sheet);
     };
 
     return (
@@ -49,6 +78,37 @@ export const ExportControl = () => {
                 </span>
                 月報エクスポート
             </h3>
+
+            {/* 月報の様式に載せる項目 */}
+            <div className="mb-4 grid grid-cols-2 gap-3">
+                <div className="flex flex-col gap-1">
+                    <label htmlFor="reporter-name" className="text-xs font-medium text-slate-500">氏名（月報の右上）</label>
+                    <input
+                        id="reporter-name"
+                        type="text"
+                        value={reporterName}
+                        onChange={(e) => changeName(e.target.value)}
+                        placeholder="例：山田 太郎"
+                        className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                    />
+                </div>
+                <div className="flex flex-col gap-1">
+                    <label htmlFor="prescribed-days" className="text-xs font-medium text-slate-500">規定出勤日数（{month}月度）</label>
+                    <input
+                        id="prescribed-days"
+                        type="text"
+                        inputMode="numeric"
+                        value={daysValue}
+                        onChange={(e) => changeDays(e.target.value)}
+                        placeholder={`${defaultDays}（平日の日数）`}
+                        className="rounded-lg border border-slate-600 bg-slate-700 px-3 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                    />
+                </div>
+                <p className="col-span-2 text-[10px] leading-relaxed text-slate-500">
+                    ※ 氏名を入れると、その人は各日の「人員」欄に載りません（同行した人の名字だけが載ります）。
+                    規定出勤日数は会社のカレンダーに合わせて入力してください（空欄のときは期間内の平日の日数）。
+                </p>
+            </div>
 
             <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
                 <div className="flex gap-2">

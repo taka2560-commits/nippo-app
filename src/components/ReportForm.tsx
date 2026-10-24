@@ -22,25 +22,15 @@ import {
     sortByUsage,
     getBackupReminder,
     snoozeBackupReminder,
-    SiteGroup,
+    getSiteContentStats,
+    StorageSettings,
     StoredReport,
     WorkPreset,
 } from "@/lib/storage";
 
 
 
-interface Options {
-    workerNames: string[];
-    workSiteGroups: SiteGroup[];
-    workContents: string[];
-    manDayOptions: string[];
-    overtimeOptions: string[];
-    earlyStartOptions: string[];
-    overtimeHoursOptions: string[];
-    locationOptions: string[];
-    materialOptions: string[];
-    presets: WorkPreset[];
-}
+type Options = StorageSettings;
 
 // まとめて登録できる最大日数
 const MAX_BULK_DAYS = 31;
@@ -371,8 +361,15 @@ export default function ReportForm() {
     const sortedOptions = useMemo(() => {
         if (!options) return null;
         const reports = getReports();
+        // 作業内容は、全体でよく使う順に並べたうえで、選んだ現場でよく使うものを先頭にする
+        const siteUsed = reports
+            .filter((r) => workSite && r.workSite === workSite)
+            .flatMap((r) => r.workEntries.map((e) => e.content));
         return {
-            workContents: sortByUsage(options.workContents, reports.flatMap((r) => r.workEntries.map((e) => e.content))),
+            workContents: sortByUsage(
+                sortByUsage(options.workContents, reports.flatMap((r) => r.workEntries.map((e) => e.content))),
+                siteUsed
+            ),
             locationOptions: sortByUsage(
                 options.locationOptions || [],
                 reports.flatMap((r) => r.workEntries.map((e) => e.location).filter(Boolean))
@@ -381,7 +378,30 @@ export default function ReportForm() {
         };
     // submittedDates は保存のたびに更新される（使用回数の再計算のきっかけ）
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [options, submittedDates]);
+    }, [options, submittedDates, workSite]);
+
+    // 選んだ現場でよく使う作業内容（まだ入力していないもの）を提案する
+    const contentSuggestions = useMemo(() => {
+        const inUse = new Set(workEntries.map((e) => e.content.trim()));
+        return getSiteContentStats(getReports(), workSite)
+            .filter((s) => !inUse.has(s.content))
+            .slice(0, 6);
+    // submittedDates は保存のたびに更新される（使用回数の再計算のきっかけ）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [workSite, workEntries, submittedDates]);
+
+    // 提案をタップ：内容が空の作業行があればそこへ、なければ新しい行を足して入れる
+    const addSuggestedContent = (content: string) => {
+        const emptyIndex = workEntries.findIndex((e) => !e.content.trim());
+        if (emptyIndex >= 0) {
+            setWorkEntries(workEntries.map((e, i) => (i === emptyIndex ? { ...e, content } : e)));
+        } else {
+            setWorkEntries([
+                ...workEntries,
+                { id: entryIdCounter++, location: "", content, manDays: "", overtime: "0" },
+            ]);
+        }
+    };
 
     // 選択中の月の、入力していない平日
     const missingThisMonth = useMemo(() => {
@@ -1083,6 +1103,28 @@ export default function ReportForm() {
                                 )}
                             </div>
                         </div>
+
+                        {/* この現場でよく使う作業内容の提案 */}
+                        {workSite && contentSuggestions.length > 0 && (
+                            <div className="space-y-1.5">
+                                <p className="text-[11px] font-semibold text-slate-400">
+                                    💡 この現場でよく使う作業内容（タップで入力）
+                                </p>
+                                <div className="flex flex-wrap gap-2">
+                                    {contentSuggestions.map((s) => (
+                                        <button
+                                            key={s.content}
+                                            type="button"
+                                            onClick={() => addSuggestedContent(s.content)}
+                                            className="rounded-full border border-sky-500/40 bg-sky-500/10 px-3 py-1.5 text-xs font-semibold text-sky-200 active:bg-sky-500/25"
+                                        >
+                                            {s.content}
+                                            <span className="ml-1 font-normal text-sky-300/70">×{s.count}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
                         {/* 作業内容行リスト */}
                         <div id="field-entries" className="space-y-3">

@@ -1,7 +1,8 @@
 import { getReports } from "./storage";
+import { drawMonthlySheet, PDF_FONT_FILE, PDF_FONT_NAME } from "./monthly-pdf.ts";
+import type { MonthlySheet } from "./monthly-sheet.ts";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
 
 export interface MonthlyReportData {
     date: string; // YYYY-MM-DD
@@ -146,104 +147,30 @@ export const exportToExcel = (data: MonthlyReportData[], year: number, month: nu
 /**
  * PDF出力（画像レイアウト風）
  */
-export const exportToPDF = async (data: MonthlyReportData[], year: number, month: number) => {
-    // A4縦向き
-    const doc = new jsPDF("p", "pt", "a4");
+/**
+ * PDF出力（Excelの月報様式・A4縦・1ページ）
+ */
+export const exportToPDF = async (sheet: MonthlySheet) => {
+    const doc = new jsPDF({ unit: "pt", format: "a4", orientation: "portrait" });
 
     // 日本語フォント読み込み
     try {
-        const fontUrl = "/fonts/IBMPlexSansJP-Regular.ttf";
-        const response = await fetch(fontUrl);
+        const response = await fetch(`/fonts/${PDF_FONT_FILE}`);
         if (!response.ok) {
             throw new Error(`Failed to fetch font: ${response.statusText}`);
         }
-        const fontBytes = await response.arrayBuffer();
-
-        // base64変換
-        const uint8Array = new Uint8Array(fontBytes);
-        let binaryString = "";
-        for (let i = 0; i < uint8Array.length; i++) {
-            binaryString += String.fromCharCode(uint8Array[i]);
-        }
-        const base64String = btoa(binaryString);
-
-        // VFSに追加
-        const fileName = "IBMPlexSansJP-Regular.ttf";
-        doc.addFileToVFS(fileName, base64String);
-        doc.addFont(fileName, "IBMPlexSansJP", "normal");
-        doc.setFont("IBMPlexSansJP");
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        let binary = "";
+        for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+        doc.addFileToVFS(PDF_FONT_FILE, btoa(binary));
+        doc.addFont(PDF_FONT_FILE, PDF_FONT_NAME, "normal");
+        doc.setFont(PDF_FONT_NAME);
     } catch (e) {
         console.error("Font load error:", e);
-        alert("日本語フォント(IBM Plex Sans JP)の読み込みに失敗しました。\n管理者にご連絡ください。");
+        alert("日本語フォント(IBM Plex Sans JP)の読み込みに失敗しました。\n通信状況を確認してもう一度お試しください。");
+        return; // フォントがないと文字が崩れるので、PDFは作らない
     }
 
-    // タイトル
-    doc.setFontSize(16);
-    // フォント指定
-    try {
-        doc.setFont("IBMPlexSansJP");
-    } catch { }
-
-    doc.text(`作業月報 令和${year - 2018}年${month}月度`, 40, 40);
-
-    // データ検証とサニタイズ（フォーマット変更：日付(曜日), 現場名, 場所, 作業内容, 人工, 残業, 作業員名）
-    const bodyData = data.map((d) => {
-        const dateStr = d.date ? `${d.date}(${d.dayOfWeek})` : "";
-        return [
-            dateStr,
-            d.siteName || "",
-            d.location || "",
-            d.content || "",
-            d.manDays ? String(d.manDays) : "",
-            d.normalOvertime ? String(d.normalOvertime) : "",
-            d.workerNames || ""
-        ];
-    });
-
-    // デバッグ情報
-    console.log("PDF Body Data Sample:", bodyData[0]);
-
-    // A4の横幅は約595pt。左右マージン40ptとすると、テーブル幅は515pt。
-    const tableMetadata = {
-        startY: 60,
-        head: [[
-            "日付", "現場名", "場所", "作業内容", "人工", "残業", "作業員名"
-        ]],
-        body: bodyData,
-        theme: "grid" as const,
-        styles: {
-            fontSize: 7,
-            cellPadding: 2,
-            minCellHeight: 20, // 行の高さを少し小さくして1ページに収める
-            overflow: "linebreak" as const,
-            font: "IBMPlexSansJP",
-            fontStyle: "normal" as const,
-            valign: "middle" as const,
-        },
-        headStyles: {
-            fillColor: [60, 100, 150] as [number, number, number], // 少し青みがかったヘッダー色で見栄えを良く
-            textColor: 255,
-            halign: "center" as const,
-            valign: "middle" as const,
-            lineWidth: 0.1,
-            lineColor: 150
-        },
-        bodyStyles: {
-            lineWidth: 0.1,
-            lineColor: 150
-        },
-        columnStyles: {
-            0: { cellWidth: 45, halign: "center" as const }, // 日付(曜日)
-            1: { cellWidth: 90 }, // 現場名
-            2: { cellWidth: 70 }, // 場所
-            3: { cellWidth: 130 }, // 作業内容
-            4: { cellWidth: 25, halign: "center" as const }, // 人工
-            5: { cellWidth: 25, halign: "center" as const }, // 残業
-            6: { cellWidth: 130 }, // 作業員名
-        },
-    };
-
-    autoTable(doc, tableMetadata);
-
-    doc.save(`nippo_monthly_${year}_${month}.pdf`);
+    drawMonthlySheet(doc, sheet);
+    doc.save(`nippo_monthly_${sheet.year}_${sheet.month}.pdf`);
 };
