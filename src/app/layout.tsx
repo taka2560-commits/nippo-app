@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import BottomNav from "@/components/BottomNav";
+import OfflineSupport from "@/components/OfflineSupport";
 
 export const metadata: Metadata = {
   title: "作業日報入力 | 日報自動入力システム",
@@ -33,6 +34,7 @@ export default function RootLayout({
         {/* 下部タブバーの高さ（3.75rem）ぶん、内容の下に余白を取る */}
         <div style={{ paddingBottom: "calc(3.75rem + env(safe-area-inset-bottom))" }}>{children}</div>
         <BottomNav />
+        <OfflineSupport />
       </body>
     </html>
   );

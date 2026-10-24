@@ -132,8 +132,18 @@ const DEFAULT_SETTINGS: StorageSettings = {
     ],
 };
 
-const SETTINGS_KEY = "nippo_settings";
+export const SETTINGS_KEY = "nippo_settings";
 export const REPORTS_KEY = "nippo_reports";
+
+// 保存されている文字列から設定を作る（足りない項目は初期値で補う）
+export const parseSettings = (stored: string | null): StorageSettings => {
+    if (!stored) return DEFAULT_SETTINGS;
+    try {
+        return { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
+    } catch {
+        return DEFAULT_SETTINGS;
+    }
+};
 
 // 設定（マスタ）関連
 export const getSettings = (): StorageSettings => {
@@ -457,6 +467,8 @@ const LAST_BACKUP_KEY = "nippo_last_backup";
 const FIRST_SEEN_KEY = "nippo_first_seen";
 const BACKUP_SNOOZE_KEY = "nippo_backup_snooze_until";
 export const BACKUP_REMINDER_DAYS = 30;
+
+export const LAST_BACKUP_STORAGE_KEY = "nippo_last_backup";
 
 export const getLastBackupAt = (): string | null => {
     if (typeof window === "undefined") return null;
