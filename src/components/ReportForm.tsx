@@ -8,6 +8,7 @@ import WorkEntryRow from "./WorkEntryRow";
 import SuccessOverlay from "./SuccessOverlay";
 import CalendarPicker from "./CalendarPicker";
 import VoiceInputButton from "./VoiceInputButton";
+import ScheduleImport, { type ScheduleApply } from "./ScheduleImport";
 import { addDays, isWeekend, formatShortDate, getMissingWeekdays, todayStr, toDateStr } from "@/lib/dates";
 import {
     getSettings,
@@ -88,6 +89,7 @@ export default function ReportForm() {
     const [bulkSkipWeekends, setBulkSkipWeekends] = useState(false);
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
     const [lastSavedDate, setLastSavedDate] = useState<string | null>(null);
+    const [scheduleNote, setScheduleNote] = useState<string | null>(null);
 
     // 下書き・バックアップの促し
     const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
@@ -274,6 +276,7 @@ export default function ReportForm() {
         setIsExistingReport(false);
         setCopiedFromDate(null);
         setDraftSavedAt(null);
+        setScheduleNote(null);
         try {
             // その日の書きかけがあれば、保存済みの内容より優先して開く
             const draft = getDraft(date);
@@ -312,6 +315,69 @@ export default function ReportForm() {
         clearDraft(reportDate);
         loadReportByDate(reportDate);
         // loadReportByDate は下書きを先に探すので、消してから呼ぶ
+    };
+
+    // 予定表の読み取り結果を入力欄に反映する（送信するまで保存はされない）。閉じてよければ true
+    const applySchedule = (d: ScheduleApply): boolean => {
+        if (
+            getReportByDate(d.date) &&
+            !confirm("この日はすでに日報があります。予定表の内容で入力欄を置き換えますか？\n（「日報を更新する」を押すまで保存されません）")
+        ) {
+            return false;
+        }
+        // 名簿にない現場・名前は、使えるように名簿へ追加する
+        const settings = { ...getSettings() };
+        let changed = false;
+        if (d.newSite) {
+            const groups = settings.workSiteGroups.map((g) => ({ ...g, sites: [...g.sites] }));
+            const group = groups.find((g) => g.group === d.newSite?.group);
+            if (group) {
+                if (!group.sites.includes(d.newSite.site)) group.sites.push(d.newSite.site);
+            } else {
+                groups.push({ group: d.newSite.group, sites: [d.newSite.site] });
+            }
+            settings.workSiteGroups = groups;
+            changed = true;
+        }
+        const added = d.newWorkers.filter((n) => !settings.workerNames.includes(n));
+        if (added.length > 0) {
+            settings.workerNames = [...settings.workerNames, ...added];
+            changed = true;
+        }
+        if (changed) {
+            saveSettings(settings);
+            setOptions(settings);
+        }
+
+        // その日を開いてから、予定表の内容で入力欄を作り直す
+        setReportDate(d.date);
+        loadReportByDate(d.date);
+        setWorkSite(d.siteValue);
+        setWorkerNames(d.workerNames);
+        setEarlyStart("0");
+        setOvertimeHours("0");
+        const manDays = d.workerNames.length > 0 ? d.workerNames.length.toFixed(1) : "";
+        setWorkEntries([
+            {
+                id: entryIdCounter++,
+                location: "",
+                content: d.content,
+                manDays: settings.manDayOptions.includes(manDays) ? manDays : "",
+                overtime: "0",
+            },
+        ]);
+        setMaterials([]);
+        setRemarks("");
+        setIsExistingReport(!!getReportByDate(d.date));
+        setCopiedFromDate(null);
+        setDraftSavedAt(null);
+        setStatus("idle");
+        setShowErrors(false);
+        baselineSig.current = EMPTY_SIG; // 保存済みの内容とは別物として、下書きに残す
+        resyncBaseline.current = false;
+        setScheduleNote(`${formatShortDate(d.date)} の予定表から入力しました。作業内容などを確認して、送信してください。`);
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        return true;
     };
 
     // 選択中の日付より前で、いちばん新しい日報（連続する現場のコピー元）
@@ -963,6 +1029,15 @@ export default function ReportForm() {
                                 )
                             )}
                         </div>
+
+                        {/* 予定表の写真から入力 */}
+                        <ScheduleImport anchorDate={reportDate} options={options} onApply={applySchedule} />
+                        {scheduleNote && (
+                            <div className="flex items-start gap-2 rounded-xl border border-violet-500/30 bg-violet-500/10 px-3 py-2 text-xs text-violet-200">
+                                <span className="min-w-0 flex-1">📷 {scheduleNote}</span>
+                                <button type="button" onClick={() => setScheduleNote(null)} aria-label="閉じる" className="shrink-0 px-1 text-violet-300">×</button>
+                            </div>
+                        )}
 
                         {/* よく使う組み合わせ */}
                         <div className="space-y-1.5">
