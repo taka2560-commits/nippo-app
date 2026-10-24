@@ -20,6 +20,9 @@ export interface StorageSettings {
     locationOptions: string[];
     materialOptions: string[];
     presets: WorkPreset[];
+    // 月報（PDF）の右上に表示する氏名と、月度ごとの規定出勤日数（"2026-10" → 24）
+    reporterName: string;
+    prescribedDays: Record<string, number>;
     // 固定オプション（編集不可だが保存はしておく）
     manDayOptions: string[];
     overtimeOptions: string[]; // 早出残業の選択肢（0.5h, 1.0h...）
@@ -108,6 +111,8 @@ const DEFAULT_SETTINGS: StorageSettings = {
         "3Dスキャナー",
     ],
     presets: [],
+    reporterName: "",
+    prescribedDays: {},
     manDayOptions: [
         "0.25", "0.5", "0.75", "1.0",
         "1.25", "1.5", "1.75", "2.0",
@@ -174,9 +179,17 @@ export const getSettings = (): StorageSettings => {
     return settings;
 };
 
+// 同じタブ内で保存したことを、保存内容を表示している画面（useReports など）へ知らせる
+const notifyStorageChange = () => {
+    if (typeof window !== "undefined" && typeof window.dispatchEvent === "function") {
+        window.dispatchEvent(new Event("storage"));
+    }
+};
+
 export const saveSettings = (settings: StorageSettings) => {
     if (typeof window === "undefined") return;
     localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+    notifyStorageChange();
 };
 
 // 日報関連
@@ -193,6 +206,27 @@ export const parseReports = (stored: string | null): StoredReport[] => {
 export const getReports = (): StoredReport[] => {
     if (typeof window === "undefined") return [];
     return parseReports(localStorage.getItem(REPORTS_KEY));
+};
+
+// 現場ごとの作業内容の使用回数（その現場で何日使ったか。多い順、同数は先に使った順）
+export const getSiteContentStats = (
+    reports: StoredReport[],
+    workSite: string
+): { content: string; count: number }[] => {
+    if (!workSite) return [];
+    const counts = new Map<string, number>();
+    for (const r of reports) {
+        if (r.workSite !== workSite) continue;
+        const seenToday = new Set<string>();
+        for (const e of r.workEntries ?? []) {
+            const c = e.content?.trim();
+            if (c && !seenToday.has(c)) {
+                seenToday.add(c);
+                counts.set(c, (counts.get(c) ?? 0) + 1);
+            }
+        }
+    }
+    return Array.from(counts, ([content, count]) => ({ content, count })).sort((a, b) => b.count - a.count);
 };
 
 // 選択肢を「過去の日報での使用回数が多い順」に並べる（同数は元の順を保つ）
@@ -220,6 +254,7 @@ export const saveReport = (report: StoredReport) => {
         reports.push({ ...report, submittedAt: new Date().toISOString() });
     }
     localStorage.setItem(REPORTS_KEY, JSON.stringify(reports));
+    notifyStorageChange();
 };
 
 export const deleteReport = (date: string) => {
@@ -227,6 +262,7 @@ export const deleteReport = (date: string) => {
     const reports = getReports();
     const newReports = reports.filter((r) => r.reportDate !== date);
     localStorage.setItem(REPORTS_KEY, JSON.stringify(newReports));
+    notifyStorageChange();
 };
 
 // バックアップ（機種変更時のデータ引き継ぎ）関連
@@ -266,6 +302,17 @@ export const getBackupFileName = (): string => {
 
 const isStringArray = (v: unknown): v is string[] =>
     Array.isArray(v) && v.every((x) => typeof x === "string");
+
+// 月度ごとの規定出勤日数：数値のものだけを残す
+const sanitizeDays = (v: unknown): Record<string, number> => {
+    const out: Record<string, number> = {};
+    if (v && typeof v === "object") {
+        for (const [k, n] of Object.entries(v)) {
+            if (typeof n === "number" && isFinite(n) && n >= 0) out[k] = n;
+        }
+    }
+    return out;
+};
 
 // バックアップファイルの中身を検証してBackupDataとして返す（不正ならエラー）
 export const parseBackup = (text: string): BackupData => {
@@ -319,6 +366,9 @@ export const parseBackup = (text: string): BackupData => {
                           isStringArray(p.workerNames)
                   )
                 : [],
+            // 旧バージョンのバックアップには無いので、空として扱う
+            reporterName: typeof settings.reporterName === "string" ? settings.reporterName : "",
+            prescribedDays: sanitizeDays(settings.prescribedDays),
         },
         reports,
     };
@@ -345,6 +395,8 @@ const mergeSettings = (current: StorageSettings, incoming: StorageSettings): Sto
     return {
         ...current,
         presets,
+        reporterName: current.reporterName || incoming.reporterName,
+        prescribedDays: { ...incoming.prescribedDays, ...current.prescribedDays },
         workerNames: mergeList(current.workerNames, incoming.workerNames),
         workSiteGroups: groups,
         workContents: mergeList(current.workContents, incoming.workContents),
@@ -376,6 +428,7 @@ export const restoreBackup = (backup: BackupData, mode: ImportMode): ImportResul
     reports.sort((a, b) => a.reportDate.localeCompare(b.reportDate));
     saveSettings(settings);
     localStorage.setItem(REPORTS_KEY, JSON.stringify(reports));
+    notifyStorageChange();
 
     return { reportCount: reports.length, importedReportCount: backup.reports.length };
 };

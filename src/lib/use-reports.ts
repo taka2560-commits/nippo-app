@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useSyncExternalStore } from "react";
-import { REPORTS_KEY, parseReports, StoredReport } from "@/lib/storage";
+import { REPORTS_KEY, SETTINGS_KEY, parseReports, parseSettings, StorageSettings, StoredReport } from "@/lib/storage";
 
 const subscribe = (onChange: () => void) => {
     window.addEventListener("storage", onChange);
@@ -16,4 +16,14 @@ export function useReports(): StoredReport[] | null {
         () => null
     );
     return useMemo(() => (raw === null ? null : parseReports(raw)), [raw]);
+}
+
+// 保存済みの設定を読む。サーバー描画中・初回描画前は null
+export function useSettings(): StorageSettings | null {
+    const raw = useSyncExternalStore<string | null>(
+        subscribe,
+        () => localStorage.getItem(SETTINGS_KEY) ?? "",
+        () => null
+    );
+    return useMemo(() => (raw === null ? null : parseSettings(raw || null)), [raw]);
 }

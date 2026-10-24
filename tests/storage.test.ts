@@ -107,6 +107,18 @@ describe("バックアップの読み込みチェック", () => {
         assert.equal(b.settings.presets.length, 1);
     });
 
+    test("月報の氏名・規定出勤日数：古いバックアップには無いので空、壊れた値は取り除く", () => {
+        const data = valid() as { settings: Record<string, unknown> };
+        const old = storage.parseBackup(JSON.stringify(data));
+        assert.equal(old.settings.reporterName, "");
+        assert.deepEqual(old.settings.prescribedDays, {});
+        data.settings.reporterName = "吉本 貴洋";
+        data.settings.prescribedDays = { "2026-10": 24, "2026-11": "x", "2026-12": -1 };
+        const b = storage.parseBackup(JSON.stringify(data));
+        assert.equal(b.settings.reporterName, "吉本 貴洋");
+        assert.deepEqual(b.settings.prescribedDays, { "2026-10": 24 });
+    });
+
     test("組み合わせの無い古いバックアップは空として扱う", () => {
         const data = valid() as { settings: Record<string, unknown> };
         delete data.settings.presets;
@@ -160,6 +172,20 @@ describe("バックアップの取り込み", () => {
         const s = storage.getSettings();
         assert.deepEqual(s.workerNames, ["山田 太郎", "新人 一郎"]);
         assert.deepEqual(s.presets.map((p) => `${p.name}:${p.workSite}`), ["A班:この端末の現場", "B班:大阪現場A"]);
+    });
+
+    test("追加：氏名はこの端末を優先（空ならバックアップの氏名）、規定出勤日数はこの端末を優先して結合", () => {
+        storage.saveSettings({ ...storage.getSettings(), reporterName: "", prescribedDays: { "2026-10": 24 } });
+        storage.restoreBackup(
+            backupWith([], { reporterName: "吉本 貴洋", prescribedDays: { "2026-10": 22, "2026-11": 23 } }),
+            "merge"
+        );
+        let s = storage.getSettings();
+        assert.equal(s.reporterName, "吉本 貴洋");
+        assert.deepEqual(s.prescribedDays, { "2026-10": 24, "2026-11": 23 });
+        storage.restoreBackup(backupWith([], { reporterName: "別の人" }), "merge");
+        s = storage.getSettings();
+        assert.equal(s.reporterName, "吉本 貴洋");
     });
 
     test("追加：現場グループは同名グループの中の現場を結合する", () => {
@@ -272,6 +298,38 @@ describe("バックアップのお知らせ", () => {
         const r = storage.getBackupReminder();
         assert.equal(r.show, true);
         assert.equal(r.neverBackedUp, false);
+    });
+});
+
+describe("現場ごとの作業内容の提案", () => {
+    const withContents = (date: string, site: string, contents: string[]) =>
+        report(date, {
+            workSite: site,
+            workEntries: contents.map((c) => ({ location: "", content: c, manDays: 1, overtime: 0 })),
+        });
+
+    test("その現場で使った日数の多い順に並べる", () => {
+        const reports = [
+            withContents("2026-10-01", "東京現場A", ["墨出し", "杭打ち"]),
+            withContents("2026-10-02", "東京現場A", ["墨出し"]),
+            withContents("2026-10-03", "東京現場A", ["墨出し", "測量"]),
+            withContents("2026-10-04", "大阪現場A", ["清掃", "清掃"]),
+        ];
+        assert.deepEqual(storage.getSiteContentStats(reports, "東京現場A"), [
+            { content: "墨出し", count: 3 },
+            { content: "杭打ち", count: 1 },
+            { content: "測量", count: 1 },
+        ]);
+    });
+
+    test("他の現場の作業は混ぜない・同じ日に同じ内容が複数あっても1日と数える", () => {
+        const reports = [
+            withContents("2026-10-01", "東京現場A", ["墨出し"]),
+            withContents("2026-10-02", "大阪現場A", ["清掃", "清掃"]),
+        ];
+        assert.deepEqual(storage.getSiteContentStats(reports, "大阪現場A"), [{ content: "清掃", count: 1 }]);
+        assert.deepEqual(storage.getSiteContentStats(reports, "未登録の現場"), []);
+        assert.deepEqual(storage.getSiteContentStats(reports, ""), []);
     });
 });
 
