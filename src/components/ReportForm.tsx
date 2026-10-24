@@ -23,11 +23,8 @@ import {
     getBackupReminder,
     snoozeBackupReminder,
     SiteGroup,
-    StorageSettings,
     StoredReport,
     WorkPreset,
-    WorkEntry as StorageWorkEntry,
-    MaterialItem as StorageMaterialItem,
 } from "@/lib/storage";
 
 
@@ -569,7 +566,7 @@ export default function ReportForm() {
 
             // --- 手入力された新しい項目を記憶する処理 ---
             if (options) {
-                let updatedSettings = { ...options };
+                const updatedSettings = { ...options };
                 let hasChanges = false;
 
                 // 新しい作業内容

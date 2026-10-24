@@ -24,7 +24,6 @@ export interface StoredReport {
 // Next.js開発モードではモジュールがホットリロードで再評価されるため
 // globalThisに保存して永続化する
 declare global {
-    // eslint-disable-next-line no-var
     var _reportStore: Map<string, StoredReport> | undefined;
 }
 

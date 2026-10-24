@@ -1,13 +1,15 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef, useMemo, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
     getSettings,
     saveSettings,
     StorageSettings,
-    SiteGroup,
+    SETTINGS_KEY,
+    LAST_BACKUP_STORAGE_KEY,
+    parseSettings,
     BackupData,
     ImportMode,
     createBackup,
@@ -18,9 +20,37 @@ import {
     restoreBackup,
 } from "@/lib/storage";
 
+// localStorage の変更（別タブでの更新）を購読する。サーバー描画中・初回描画前は null
+const subscribeStorage = (onChange: () => void) => {
+    window.addEventListener("storage", onChange);
+    return () => window.removeEventListener("storage", onChange);
+};
+const noopSubscribe = () => () => { };
+
+// ファイル共有（LINE・メール・AirDrop等）に対応した端末か
+const detectCanShareFile = (): boolean => {
+    try {
+        const probe = new File(["{}"], "probe.json", { type: "application/json" });
+        return !!navigator.canShare && navigator.canShare({ files: [probe] });
+    } catch {
+        return false;
+    }
+};
+
 export default function SettingsPage() {
     const router = useRouter();
-    const [settings, setSettings] = useState<StorageSettings | null>(null);
+    // 保存済みの設定を読み、編集を始めたら編集中の内容（edited）を優先して表示する
+    const rawSettings = useSyncExternalStore<string | null>(
+        subscribeStorage,
+        () => localStorage.getItem(SETTINGS_KEY) ?? "",
+        () => null
+    );
+    const storedSettings = useMemo(
+        () => (rawSettings === null ? null : parseSettings(rawSettings || null)),
+        [rawSettings]
+    );
+    const [edited, setSettings] = useState<StorageSettings | null>(null);
+    const settings = edited ?? storedSettings;
     const [isSaving, setIsSaving] = useState(false);
 
     // 一時入力用state
@@ -35,23 +65,15 @@ export default function SettingsPage() {
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [pendingBackup, setPendingBackup] = useState<BackupData | null>(null);
     const [transferMessage, setTransferMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
-    const [canShareFile, setCanShareFile] = useState(false);
-    const [lastBackupAt, setLastBackupAt] = useState<string | null>(null);
-
-    // 設定読み込み
-    useEffect(() => {
-        const currentSettings = getSettings();
-        setSettings(currentSettings);
-        setLastBackupAt(getLastBackupAt());
-
-        // ファイル共有（LINE・メール・AirDrop等）に対応した端末か判定
-        try {
-            const probe = new File(["{}"], "probe.json", { type: "application/json" });
-            setCanShareFile(!!navigator.canShare && navigator.canShare({ files: [probe] }));
-        } catch {
-            setCanShareFile(false);
-        }
-    }, []);
+    const canShareFile = useSyncExternalStore(noopSubscribe, detectCanShareFile, () => false);
+    // 前回のバックアップ日時：このタブで書き出した直後は最新の値（backupDoneAt）を優先して表示
+    const storedLastBackup = useSyncExternalStore<string | null>(
+        subscribeStorage,
+        () => localStorage.getItem(LAST_BACKUP_STORAGE_KEY),
+        () => null
+    );
+    const [backupDoneAt, setLastBackupAt] = useState<string | null>(null);
+    const lastBackupAt = backupDoneAt ?? storedLastBackup;
 
     // バックアップファイルを作成（未保存の変更も先に保存してから書き出す）
     const buildBackupFile = (): File => {
