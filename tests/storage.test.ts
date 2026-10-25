@@ -119,6 +119,22 @@ describe("バックアップの読み込みチェック", () => {
         assert.deepEqual(b.settings.prescribedDays, { "2026-10": 24 });
     });
 
+    test("備考の定型文・月ごとの備考：古いバックアップは初期値、壊れた値は取り除く", () => {
+        const data = valid() as { settings: Record<string, unknown> };
+        const old = storage.parseBackup(JSON.stringify(data));
+        assert.deepEqual(old.settings.notePhrases, storage.DEFAULT_NOTE_PHRASES);
+        assert.deepEqual(old.settings.monthlyNotes, {});
+        data.settings.notePhrases = ["雨天中止", 3];
+        data.settings.monthlyNotes = {
+            "2026-10": { text: "直行", excluded: ["2026-09-28"] },
+            "2026-11": { text: 5, excluded: [] },
+            "2026-12": "x",
+        };
+        const b = storage.parseBackup(JSON.stringify(data));
+        assert.deepEqual(b.settings.notePhrases, storage.DEFAULT_NOTE_PHRASES); // 配列の中身が文字だけでないものは使わない
+        assert.deepEqual(b.settings.monthlyNotes, { "2026-10": { text: "直行", excluded: ["2026-09-28"] } });
+    });
+
     test("組み合わせの無い古いバックアップは空として扱う", () => {
         const data = valid() as { settings: Record<string, unknown> };
         delete data.settings.presets;
@@ -186,6 +202,25 @@ describe("バックアップの取り込み", () => {
         storage.restoreBackup(backupWith([], { reporterName: "別の人" }), "merge");
         s = storage.getSettings();
         assert.equal(s.reporterName, "吉本 貴洋");
+    });
+
+    test("追加：定型文は重ねて結合、月ごとの備考はこの端末を優先", () => {
+        storage.saveSettings({
+            ...storage.getSettings(),
+            notePhrases: ["雨天のため作業中止"],
+            monthlyNotes: { "2026-10": { text: "この端末", excluded: [] } },
+        });
+        storage.restoreBackup(
+            backupWith([], {
+                notePhrases: ["雨天のため作業中止", "新しい定型文"],
+                monthlyNotes: { "2026-10": { text: "バックアップ", excluded: [] }, "2026-11": { text: "別の月", excluded: [] } },
+            }),
+            "merge"
+        );
+        const s = storage.getSettings();
+        assert.deepEqual(s.notePhrases, ["雨天のため作業中止", "新しい定型文"]);
+        assert.equal(s.monthlyNotes["2026-10"].text, "この端末");
+        assert.equal(s.monthlyNotes["2026-11"].text, "別の月");
     });
 
     test("追加：現場グループは同名グループの中の現場を結合する", () => {

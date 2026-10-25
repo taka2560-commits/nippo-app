@@ -13,6 +13,13 @@ export interface WorkPreset {
     workSite: string;
 }
 
+export interface MonthlyNote {
+    text: string;
+    excluded: string[]; // 備考欄に載せない日報の備考（日付 YYYY-MM-DD）
+}
+
+export const DEFAULT_NOTE_PHRASES = ["雨天のため作業中止", "休日出勤", "有給休暇", "半休"];
+
 export interface StorageSettings {
     workerNames: string[];
     workSiteGroups: SiteGroup[];
@@ -23,6 +30,9 @@ export interface StorageSettings {
     // 月報（PDF）の右上に表示する氏名と、月度ごとの規定出勤日数（"2026-10" → 24）
     reporterName: string;
     prescribedDays: Record<string, number>;
+    // 月報の備考欄：よく使う定型文と、月度ごとの内容（"2026-10" → 自由記入の文章と、載せない日報の備考の日付）
+    notePhrases: string[];
+    monthlyNotes: Record<string, MonthlyNote>;
     // 固定オプション（編集不可だが保存はしておく）
     manDayOptions: string[];
     overtimeOptions: string[]; // 早出残業の選択肢（0.5h, 1.0h...）
@@ -113,6 +123,8 @@ const DEFAULT_SETTINGS: StorageSettings = {
     presets: [],
     reporterName: "",
     prescribedDays: {},
+    notePhrases: DEFAULT_NOTE_PHRASES,
+    monthlyNotes: {},
     manDayOptions: [
         "0.25", "0.5", "0.75", "1.0",
         "1.25", "1.5", "1.75", "2.0",
@@ -314,6 +326,18 @@ const sanitizeDays = (v: unknown): Record<string, number> => {
     return out;
 };
 
+// 月度ごとの備考：形が正しいものだけを残す
+const sanitizeNotes = (v: unknown): Record<string, MonthlyNote> => {
+    const out: Record<string, MonthlyNote> = {};
+    if (v && typeof v === "object") {
+        for (const [k, n] of Object.entries(v)) {
+            const x = n as Partial<MonthlyNote> | null;
+            if (x && typeof x.text === "string" && isStringArray(x.excluded)) out[k] = { text: x.text, excluded: x.excluded };
+        }
+    }
+    return out;
+};
+
 // バックアップファイルの中身を検証してBackupDataとして返す（不正ならエラー）
 export const parseBackup = (text: string): BackupData => {
     let parsed: unknown;
@@ -369,6 +393,9 @@ export const parseBackup = (text: string): BackupData => {
             // 旧バージョンのバックアップには無いので、空として扱う
             reporterName: typeof settings.reporterName === "string" ? settings.reporterName : "",
             prescribedDays: sanitizeDays(settings.prescribedDays),
+            // 古いバックアップには無いので、初期の定型文・空の備考として扱う
+            notePhrases: isStringArray(settings.notePhrases) ? settings.notePhrases : DEFAULT_NOTE_PHRASES,
+            monthlyNotes: sanitizeNotes(settings.monthlyNotes),
         },
         reports,
     };
@@ -397,6 +424,8 @@ const mergeSettings = (current: StorageSettings, incoming: StorageSettings): Sto
         presets,
         reporterName: current.reporterName || incoming.reporterName,
         prescribedDays: { ...incoming.prescribedDays, ...current.prescribedDays },
+        notePhrases: mergeList(current.notePhrases, incoming.notePhrases),
+        monthlyNotes: { ...incoming.monthlyNotes, ...current.monthlyNotes },
         workerNames: mergeList(current.workerNames, incoming.workerNames),
         workSiteGroups: groups,
         workContents: mergeList(current.workContents, incoming.workContents),
