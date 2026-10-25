@@ -5,6 +5,7 @@ import {
     defaultPrescribedDays,
     formatClock,
     formatHours,
+    isSamePerson,
     siteDisplayName,
     toDisplayNames,
 } from "../src/lib/monthly-sheet.ts";
@@ -105,6 +106,65 @@ describe("人員欄", () => {
 
     test("同じ名字が重なるときは氏名をつなげて区別する", () => {
         assert.deepEqual(toDisplayNames(["田中 太郎", "田中 次郎", "佐藤 花子"], ""), ["田中太郎", "田中次郎", "佐藤"]);
+    });
+});
+
+describe("人員から本人を省く", () => {
+    test("氏名どおり・空白の違い・名字だけ／名前だけの登録も本人とみなす", () => {
+        assert.equal(isSamePerson("吉本 貴洋", "吉本 貴洋"), true);
+        assert.equal(isSamePerson("吉本　貴洋", "吉本貴洋"), true); // 空白の違い
+        assert.equal(isSamePerson("吉本", "吉本 貴洋"), true); // 名簿が名字だけ
+        assert.equal(isSamePerson("貴洋", "吉本 貴洋"), true); // 名簿が名前だけ
+        assert.equal(isSamePerson("吉本 貴洋", "吉本"), true); // 本人の登録が名字だけ
+    });
+
+    test("別の人は本人にしない（同じ名字でも氏名が違えば別人）", () => {
+        assert.equal(isSamePerson("吉本 太郎", "吉本 貴洋"), false);
+        assert.equal(isSamePerson("田中", "吉本 貴洋"), false);
+        assert.equal(isSamePerson("吉本 貴洋", ""), false);
+        assert.equal(isSamePerson("", "吉本 貴洋"), false);
+    });
+
+    test("月報では、登録した氏名の人を人員欄から省く（名字だけの名簿でも）", () => {
+        const s = buildMonthlySheet(
+            [report("2026-09-16", { workerNames: ["吉本", "藤原 一郎", "谷口"] }), report("2026-09-17", { workerNames: ["吉本 貴洋"] })],
+            2026,
+            10,
+            { reporterName: "吉本 貴洋" }
+        );
+        assert.deepEqual(s.rows[0].names, ["藤原", "谷口"]);
+        assert.deepEqual(s.rows[1].names, []);
+        assert.equal(s.reporterName, "吉本 貴洋");
+    });
+});
+
+describe("備考欄（選ぶ・書く）", () => {
+    const base = [
+        report("2026-09-28", { remarks: "雨天のため午後中止" }),
+        report("2026-09-29", { remarks: "資材搬入" }),
+        report("2026-09-25", { overtimeHours: "1", remarks: "測量が延びた" }), // 時間外の欄に載る
+    ];
+
+    test("候補は早出・残業のない日の備考。何も選ばなければ全部載る", () => {
+        const s = buildMonthlySheet(base, 2026, 10);
+        assert.deepEqual(s.remarkCandidates.map((c) => c.line), ["9/28 雨天のため午後中止", "9/29 資材搬入"]);
+        assert.deepEqual(s.remarkLines, ["9/28 雨天のため午後中止", "9/29 資材搬入"]);
+    });
+
+    test("チェックを外した日の備考は載らない", () => {
+        const s = buildMonthlySheet(base, 2026, 10, { excludedNoteDates: ["2026-09-28"] });
+        assert.deepEqual(s.remarkLines, ["9/29 資材搬入"]);
+        assert.equal(s.remarkCandidates.length, 2); // 候補としては残る（チェックし直せる）
+    });
+
+    test("自由記入は1行ずつ、選んだ備考のあとに載る（空行は除く）", () => {
+        const s = buildMonthlySheet(base, 2026, 10, { excludedNoteDates: ["2026-09-28"], noteText: "休日出勤\r\n\n  10/12 直行  \n" });
+        assert.deepEqual(s.remarkLines, ["9/29 資材搬入", "休日出勤", "10/12 直行"]);
+    });
+
+    test("すべて外して何も書かなければ、備考欄は空", () => {
+        const s = buildMonthlySheet(base, 2026, 10, { excludedNoteDates: ["2026-09-28", "2026-09-29"] });
+        assert.deepEqual(s.remarkLines, []);
     });
 });
 

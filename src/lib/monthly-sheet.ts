@@ -31,7 +31,8 @@ export interface MonthlySheet {
     workDays: number; // 出勤
     overtimeTotal: number; // 早出・残業の合計（時間）
     prescribedDays: number; // 規定出勤日数
-    remarkLines: string[]; // 備考欄に書く内容
+    remarkCandidates: { date: string; line: string }[]; // 日報の備考のうち、備考欄に載せられるもの（早出・残業のない日）
+    remarkLines: string[]; // 備考欄に書く内容（選んだ日報の備考 → 自由記入の順）
 }
 
 // 時間の数値を "H:MM" にする（7.5 → "7:30"）
@@ -51,12 +52,31 @@ export const siteDisplayName = (workSite: string): string => {
     return i >= 0 ? workSite.slice(i + 3) : workSite;
 };
 
-const squeeze = (s: string) => s.replace(/[\s　]+/g, "");
+const squeeze = (s: string) => s.replace(/[\s\u3000]+/g, "");
+
+const nameParts = (n: string): { surname: string; given: string; single: boolean } => {
+    const [surname = "", ...rest] = n.trim().split(/[\s\u3000]+/);
+    return { surname: squeeze(surname), given: squeeze(rest.join("")), single: rest.length === 0 };
+};
+
+// 名簿の名前が、月報を作る本人かどうか。
+// 氏名どおりなら同じ人。名簿が名字だけ・名前だけのときは、本人の名字か名前と同じなら本人とみなす。
+// 本人の登録が名字だけのときは、同じ名字の人を本人とみなす。
+export const isSamePerson = (workerName: string, reporterName: string): boolean => {
+    const w = squeeze(workerName);
+    const r = squeeze(reporterName);
+    if (!w || !r) return false;
+    if (w === r) return true;
+    const wp = nameParts(workerName);
+    const rp = nameParts(reporterName);
+    if (wp.single) return w === rp.surname || (!!rp.given && w === rp.given);
+    if (rp.single) return wp.surname === rp.surname;
+    return false;
+};
 
 // 人員の欄には名字だけを書く（「山田 太郎」→「山田」）。同じ名字が重なるときは氏名をつなげる
 export const toDisplayNames = (workerNames: string[], reporterName: string): string[] => {
-    const me = squeeze(reporterName);
-    const others = workerNames.filter((n) => !me || squeeze(n) !== me);
+    const others = workerNames.filter((n) => !reporterName.trim() || !isSamePerson(n, reporterName));
     const surnames = others.map((n) => n.trim().split(/[\s　]+/)[0] ?? n);
     return others.map((n, i) => (surnames.filter((s) => s === surnames[i]).length > 1 ? squeeze(n) : surnames[i]));
 };
@@ -77,6 +97,8 @@ const num = (v: string | undefined): number => {
 export interface SheetOptions {
     reporterName?: string;
     prescribedDays?: number;
+    noteText?: string; // 備考欄に自由に書く内容
+    excludedNoteDates?: string[]; // 備考欄に載せない日報の備考（日付）
 }
 
 export const buildMonthlySheet = (
@@ -90,7 +112,7 @@ export const buildMonthlySheet = (
     const byDate = new Map(reports.map((r) => [r.reportDate, r]));
 
     const rows: SheetRow[] = [];
-    const remarkLines: string[] = [];
+    const remarkCandidates: { date: string; line: string }[] = [];
     let overtimeTotal = 0;
 
     for (let date = from; date <= to; date = addDays(date, 1)) {
@@ -126,7 +148,7 @@ export const buildMonthlySheet = (
                 const prefix = early > 0 && late > 0 ? "早・残：" : early > 0 ? "早：" : "残：";
                 overtimeNote = prefix + remarks;
             } else {
-                remarkLines.push(`${d.getMonth() + 1}/${d.getDate()} ${remarks}`);
+                remarkCandidates.push({ date, line: `${d.getMonth() + 1}/${d.getDate()} ${remarks}` });
             }
         }
 
@@ -145,6 +167,13 @@ export const buildMonthlySheet = (
         });
     }
 
+    // 備考欄：選んだ日報の備考を先に、続けて自由記入（改行ごとに1行）
+    const excluded = new Set(options.excludedNoteDates ?? []);
+    const remarkLines = [
+        ...remarkCandidates.filter((c) => !excluded.has(c.date)).map((c) => c.line),
+        ...(options.noteText ?? "").split(/\r?\n/).map((l) => l.trim()).filter(Boolean),
+    ];
+
     return {
         year,
         month,
@@ -155,6 +184,7 @@ export const buildMonthlySheet = (
         workDays: rows.filter((r) => r.hasWork).length,
         overtimeTotal,
         prescribedDays: options.prescribedDays ?? defaultPrescribedDays(year, month),
+        remarkCandidates,
         remarkLines,
     };
 };

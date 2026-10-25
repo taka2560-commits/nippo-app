@@ -60,6 +60,7 @@ export default function SettingsPage() {
     const [newWorkContent, setNewWorkContent] = useState("");
     const [newLocation, setNewLocation] = useState("");
     const [newMaterial, setNewMaterial] = useState("");
+    const [newPhrase, setNewPhrase] = useState("");
 
     // データ引き継ぎ用state
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -251,6 +252,30 @@ export default function SettingsPage() {
                     </h1>
                     <div className="w-10"></div>{/* スペーサー */}
                 </div>
+
+                {/* 氏名（月報・予定表で使う） */}
+                <section className="space-y-3">
+                    <h2 className="flex items-center gap-2 text-lg font-bold text-white">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-rose-500/20 text-rose-400">
+                            🪪
+                        </span>
+                        氏名
+                    </h2>
+                    <div className="rounded-2xl border border-slate-700 bg-slate-800/50 p-4 space-y-3">
+                        <input
+                            type="text"
+                            value={settings.reporterName}
+                            onChange={(e) => setSettings({ ...settings, reporterName: e.target.value })}
+                            placeholder="例：山田 太郎（名字と名前の間は空けてください）"
+                            aria-label="氏名"
+                            className="w-full rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:border-rose-500"
+                        />
+                        <p className="text-xs leading-relaxed text-slate-400">
+                            月報PDFの右上に表示します。この名前の人は、月報の各日の「人員」欄に載りません（同行した人の名字だけが載ります）。
+                            予定表の写真から入力するときの「自分」の判定にも使います。入力したら、下の「設定を保存する」を押してください。
+                        </p>
+                    </div>
+                </section>
 
                 {/* 作業者名設定 */}
                 <section className="space-y-3">
@@ -618,6 +643,60 @@ export default function SettingsPage() {
                                 ))}
                             </ul>
                         )}
+                    </div>
+                </section>
+
+                {/* 備考の定型文 */}
+                <section className="space-y-3">
+                    <h2 className="flex items-center gap-2 text-lg font-bold text-white">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-500/20 text-cyan-400">
+                            🗒️
+                        </span>
+                        備考の定型文
+                    </h2>
+                    <div className="rounded-2xl border border-slate-700 bg-slate-800/50 p-4 space-y-4">
+                        <p className="text-xs leading-relaxed text-slate-400">
+                            月報の備考欄に、タップするだけで入れられる文章です。
+                        </p>
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                value={newPhrase}
+                                onChange={(e) => setNewPhrase(e.target.value)}
+                                placeholder="定型文を追加"
+                                className="flex-1 rounded-xl border border-slate-600 bg-slate-900 px-3 py-2 text-sm focus:outline-none focus:border-cyan-500"
+                            />
+                            <button
+                                onClick={() =>
+                                    addItem(
+                                        settings.notePhrases,
+                                        newPhrase,
+                                        (l) => setSettings({ ...settings, notePhrases: l }),
+                                        () => setNewPhrase("")
+                                    )
+                                }
+                                className="rounded-xl bg-cyan-600 px-4 py-2 text-sm font-bold text-white hover:bg-cyan-500"
+                            >
+                                追加
+                            </button>
+                        </div>
+                        <ul className="space-y-2 max-h-40 overflow-y-auto">
+                            {settings.notePhrases.map((phrase, index) => (
+                                <li key={index} className="flex items-center justify-between rounded-lg bg-slate-700/50 px-3 py-2 text-sm">
+                                    <span>{phrase}</span>
+                                    <button
+                                        onClick={() =>
+                                            removeItem(settings.notePhrases, index, (l) => setSettings({ ...settings, notePhrases: l }))
+                                        }
+                                        className="text-slate-400 hover:text-red-400"
+                                    >
+                                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                        </svg>
+                                    </button>
+                                </li>
+                            ))}
+                        </ul>
                     </div>
                 </section>
 
